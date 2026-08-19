@@ -69,18 +69,22 @@ jobs:
           cd "$HOME/codealong"
           docker compose -f deploy/docker-compose.yml up -d --build
           docker compose -f deploy/docker-compose.yml ps
-          curl -sf --max-time 15 http://127.0.0.1:3001/ >/dev/null && echo "codealong http 200" || echo "codealong not answering yet"
-          # Best-effort Caddy site if we can write it
+          sleep 8
+          curl -sf --max-time 20 http://127.0.0.1:3001/ >/dev/null && echo "codealong http 200" || echo "codealong not answering yet"
+          CADDY="$HOME/ai-manager/deploy/Caddyfile"
           SNIP="$HOME/codealong/deploy/Caddyfile.snippet"
-          if [ -f /etc/caddy/Caddyfile ] && command -v sudo >/dev/null && sudo -n true 2>/dev/null; then
-            if ! sudo grep -q 'codealong.neel.world' /etc/caddy/Caddyfile; then
-              sudo tee -a /etc/caddy/Caddyfile < "$SNIP"
-              sudo caddy reload --config /etc/caddy/Caddyfile || sudo systemctl reload caddy || true
-              echo "appended Caddy site"
-            else
+          if [ -f "$CADDY" ] && [ -f "$SNIP" ]; then
+            if grep -q 'codealong.neel.world' "$CADDY"; then
               echo "Caddy already has codealong.neel.world"
+            else
+              printf '\n' >> "$CADDY"
+              cat "$SNIP" >> "$CADDY"
+              echo "appended codealong site to $CADDY"
             fi
+            cd "$HOME/ai-manager"
+            docker compose -f deploy/docker-compose.app.yml --env-file deploy/.env.staging --profile tls restart caddy || true
+            echo "caddy restarted"
           else
-            echo "Caddy not auto-updated. Add deploy/Caddyfile.snippet on the droplet, then reload Caddy."
+            echo "No $CADDY — add the snippet by hand and reload Caddy."
           fi
           REMOTE
