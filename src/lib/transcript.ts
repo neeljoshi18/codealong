@@ -5,10 +5,13 @@ import type { TranscriptCue } from "@/lib/types";
 export { windowTranscript } from "@/lib/transcript-window";
 
 export async function fetchTranscript(videoId: string): Promise<TranscriptCue[]> {
-  const fromLib = await fetchViaLibrary(videoId);
+  const timed = <T,>(p: Promise<T>, ms: number, fallback: T) =>
+    Promise.race([p, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))]);
+
+  const fromLib = await timed(fetchViaLibrary(videoId), 8_000, []);
   if (fromLib.length > 0) return fromLib;
 
-  const fromInnertube = await fetchViaInnertube(videoId);
+  const fromInnertube = await timed(fetchViaInnertube(videoId), 8_000, []);
   if (fromInnertube.length > 0) return fromInnertube;
 
   return [];

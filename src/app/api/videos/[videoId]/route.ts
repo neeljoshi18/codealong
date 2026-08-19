@@ -1,31 +1,46 @@
 import { after } from "next/server";
 import { getJob } from "@/lib/db";
-import { getSeed } from "@/lib/seeds";
-import { ensureHorizon, loadOrStart } from "@/lib/pipeline/run";
+import { canLiveOcr } from "@/lib/pipeline/binaries";
+import { loadOrStart, refreshMetadata } from "@/lib/pipeline/run";
+import { emptyReconstruction } from "@/lib/reconstruction-stub";
 
-export const maxDuration = 300;
+export const maxDuration = 15;
+export const dynamic = "force-dynamic";
 
 export async function GET(
   _request: Request,
   ctx: { params: Promise<{ videoId: string }> },
 ) {
   const { videoId } = await ctx.params;
-  const rec = await loadOrStart(videoId);
-
-  if (!getSeed(videoId) && rec.status !== "ready") {
+  try {
+    const rec = await loadOrStart(videoId);
     after(() => {
-      void ensureHorizon(videoId, 0);
+      void refreshMetadata(videoId);
+    });
+    return Response.json({
+      videoId,
+      reconstruction: rec,
+      liveOcr: canLiveOcr(),
+      job: getJob(videoId) ?? {
+        videoId,
+        status: rec.status,
+        progress: rec.progress,
+        message: rec.message,
+      },
+    });
+  } catch (err) {
+    const rec = emptyReconstruction(videoId);
+    rec.message = err instanceof Error ? err.message : rec.message;
+    return Response.json({
+      videoId,
+      reconstruction: rec,
+      liveOcr: canLiveOcr(),
+      job: {
+        videoId,
+        status: rec.status,
+        progress: rec.progress,
+        message: rec.message,
+      },
     });
   }
-
-  return Response.json({
-    videoId,
-    reconstruction: rec,
-    job: getJob(videoId) ?? {
-      videoId,
-      status: rec.status,
-      progress: rec.progress,
-      message: rec.message,
-    },
-  });
 }

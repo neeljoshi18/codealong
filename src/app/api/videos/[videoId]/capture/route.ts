@@ -1,11 +1,12 @@
 import { isCleanSnapshot, isUsableSnapshot, snapshotSource } from "@/lib/pipeline/code-from-ocr";
 import { previousSameFile, recoverCutoff, significantLines } from "@/lib/pipeline/code-story";
 import { insertSnapshot } from "@/lib/pipeline/ingest";
-import { reconstructionForVideo } from "@/lib/pipeline/run";
+import { canLiveOcr } from "@/lib/pipeline/binaries";
+import { loadOrStart, reconstructionForVideo } from "@/lib/pipeline/run";
 import { captureScreenAt, captureToolchain, nearbyOcrSnapshot } from "@/lib/pipeline/screen-capture";
 import { snapshotAt } from "@/lib/snapshots";
 
-export const maxDuration = 180;
+export const maxDuration = 90;
 
 export async function POST(
   request: Request,
@@ -21,10 +22,7 @@ export async function POST(
   const live = Boolean(body.live);
   const force = Boolean(body.force);
 
-  const rec = reconstructionForVideo(videoId);
-  if (!rec) {
-    return Response.json({ error: "Unknown video. Open it once first." }, { status: 404 });
-  }
+  const rec = reconstructionForVideo(videoId) ?? (await loadOrStart(videoId));
 
   const fallback = () =>
     nearbyOcrSnapshot(rec.snapshots, time, live ? 4 : 8) ?? snapshotAt(rec.snapshots, time);
@@ -37,12 +35,16 @@ export async function POST(
   }
 
   const tools = captureToolchain();
-  if (!tools.ffmpeg || !tools.tesseract) {
+  if (!tools.ffmpeg || !tools.tesseract || !canLiveOcr()) {
     return Response.json({
       reconstruction: rec,
       snapshot: fallback(),
       skipped: true,
-      note: "Showing the nearest known code.",
+      liveOcr: false,
+      note:
+        fallback()
+          ? "Showing the nearest known code."
+          : "This host can't download the video (Vercel has no ffmpeg). Featured demos work. Any other link needs local next dev or the droplet.",
     });
   }
 
@@ -77,12 +79,18 @@ export async function POST(
       ? (insertSnapshot(videoId, snapshot) ?? { ...rec, snapshots: [...rec.snapshots, snapshot] })
       : rec;
     return Response.json({ reconstruction: next, snapshot, cached: false });
-  } catch {
+  } catch (err) {
+    const snap = fallback();
+    const reason = err instanceof Error ? err.message : "";
+    const emptyNote =
+      reason === "FRAME_NOT_CODE"
+        ? "This frame doesn't look like a code editor. Pause when the file is on screen."
+        : "Couldn't fetch this moment yet. Retry in a few seconds.";
     return Response.json({
       reconstruction: rec,
-      snapshot: fallback(),
+      snapshot: snap,
       cached: true,
-      note: "Couldn't read this frame; using the nearest known code.",
+      note: snap ? "Couldn't read this frame; using the nearest known code." : emptyNote,
     });
   }
 }

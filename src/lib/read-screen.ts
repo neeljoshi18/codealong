@@ -8,6 +8,8 @@ export type ScreenRead = {
   cached?: boolean;
   note?: string;
   error?: string;
+  liveOcr?: boolean;
+  skipped?: boolean;
 };
 
 async function readOnServer(
@@ -36,6 +38,8 @@ async function readOnDevice(
   rec: VideoReconstruction | null,
   signal?: AbortSignal,
 ): Promise<ScreenRead | null> {
+  const { opfsHas } = await import("@/lib/client-engine/opfs");
+  if (!(await opfsHas(videoId))) return null;
   const { captureInBrowser } = await import("@/lib/client-engine/capture");
   const data = await captureInBrowser(videoId, time, rec, signal);
   const snap = data.snapshot && isUsableSnapshot(data.snapshot) ? data.snapshot : null;
@@ -67,14 +71,16 @@ export async function readScreen(
     }
   };
 
+  // Never wait on a browser YouTube download (CORS). Only OCR locally if
+  // this tab already has the file. Otherwise go straight to the server.
   if (!isSeeded(videoId)) {
     const device = await tryDevice();
     if (device?.snapshot) return device;
     const server = await tryServer();
-    if (server?.snapshot) return server;
+    if (server) return server;
     return {
       snapshot: null,
-      note: "This tab couldn't fetch the video file (YouTube blocks browsers). Featured demos still work.",
+      note: "This host couldn't fetch the video file (YouTube blocks browsers). Featured demos still work.",
     };
   }
 

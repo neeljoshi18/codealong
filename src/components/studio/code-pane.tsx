@@ -62,7 +62,7 @@ export function CodePane({
             <Panel defaultSize="68%" minSize="40%">
               <div className="flex h-full min-h-0">
                 <div className="min-w-0 flex-1">
-                  {snapshots.length === 0 ? <EmptyEditor recReady={rec?.status} /> : <MonacoStage />}
+                  {snapshots.length === 0 ? <EmptyEditor /> : <MonacoStage />}
                 </div>
               </div>
             </Panel>
@@ -74,7 +74,7 @@ export function CodePane({
         ) : (
           <div className="flex h-full min-h-0">
             <div className="min-w-0 flex-1">
-              {snapshots.length === 0 ? <EmptyEditor recReady={rec?.status} /> : <MonacoStage />}
+              {snapshots.length === 0 ? <EmptyEditor /> : <MonacoStage />}
             </div>
           </div>
         )}
@@ -101,13 +101,17 @@ export function CodePane({
   );
 }
 
-function EmptyEditor({ recReady }: { recReady?: string }) {
+function EmptyEditor() {
+  const liveReading = useStudio((s) => s.liveReading);
+  const liveNote = useStudio((s) => s.liveNote);
   return (
     <div className="flex h-full min-h-0 flex-col items-center justify-center gap-2 px-8 text-center">
-      <div className="text-sm text-paper">Reconstructing the editor…</div>
+      <div className="text-sm text-paper">
+        {liveReading ? "Reading this frame…" : "No code for this frame yet"}
+      </div>
       <p className="max-w-sm text-[12px] leading-5 text-mute">
-        The video is already playing. Snapshots unlock here as the pipeline stitches code from the
-        transcript{recReady === "queued" ? " (starting now)" : ""}. Featured demos load instantly.
+        {liveNote ||
+          "The video is playing. Featured demos already have the file. Other videos are read from this moment’s screen — that needs ffmpeg on this machine or the droplet, not Vercel."}
       </p>
     </div>
   );

@@ -3,16 +3,25 @@ import { setClientMediaStatus } from "@/lib/client-engine/status";
 
 const jobs = new Map<string, Promise<void>>();
 
-export async function ensureClientVideo(videoId: string): Promise<void> {
+export async function ensureClientVideo(videoId: string, timeoutMs = 8_000): Promise<void> {
   if (await opfsHas(videoId)) {
     setClientMediaStatus({ progress: 100, message: "Cached on this device", full: true });
     return;
   }
   const existing = jobs.get(videoId);
-  if (existing) return existing;
-  const job = download(videoId).finally(() => jobs.delete(videoId));
-  jobs.set(videoId, job);
-  return job;
+  const job = existing ?? download(videoId).finally(() => jobs.delete(videoId));
+  if (!existing) jobs.set(videoId, job);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      job,
+      new Promise<void>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Client download timed out")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function download(videoId: string): Promise<void> {

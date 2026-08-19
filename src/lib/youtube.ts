@@ -51,7 +51,7 @@ export interface YoutubeOEmbed {
 export async function fetchOEmbed(videoId: string): Promise<YoutubeOEmbed | null> {
   const url = `https://www.youtube.com/oembed?url=${encodeURIComponent(watchUrl(videoId))}&format=json`;
   try {
-    const res = await fetch(url, { next: { revalidate: 86400 } });
+    const res = await fetch(url, { next: { revalidate: 86400 }, signal: AbortSignal.timeout(8_000) });
     if (!res.ok) return null;
     return (await res.json()) as YoutubeOEmbed;
   } catch {
@@ -84,6 +84,7 @@ export async function fetchInnertubePlayer(videoId: string): Promise<InnertubePl
     const res = await fetch("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(8_000),
       body: JSON.stringify({
         context: {
           client: {

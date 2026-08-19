@@ -4,36 +4,15 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { completeText, hasXaiKey } from "@/lib/ai/client";
 import { extractCodeOnly, isCleanSnapshot, isUsableCode } from "@/lib/pipeline/code-from-ocr";
+import { captureToolchain, ffmpegBin, pythonBin, tesseractBin } from "@/lib/pipeline/binaries";
 import { localVideoPath, resolveMedia } from "@/lib/pipeline/media";
+import { dataRoot } from "@/lib/paths";
 import { windowTranscript } from "@/lib/transcript-window";
 import type { CodeSnapshot, TranscriptCue } from "@/lib/types";
 
 const exec = promisify(execFile);
 
-export { localVideoPath };
-
-function pythonBin(): string {
-  const candidates = [
-    "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
-    "/usr/local/bin/python3",
-    "/opt/homebrew/bin/python3",
-    "python3",
-  ];
-  return candidates.find((p) => p === "python3" || existsSync(p)) ?? "python3";
-}
-
-export function captureToolchain(): { ytDlp: boolean; ffmpeg: boolean; tesseract: boolean } {
-  return {
-    ytDlp: true,
-    ffmpeg: existsSync("/usr/local/bin/ffmpeg") || existsSync("/opt/homebrew/bin/ffmpeg"),
-    tesseract: existsSync("/usr/local/bin/tesseract") || existsSync("/opt/homebrew/bin/tesseract"),
-  };
-}
-
-function ffmpegBin(): string {
-  if (existsSync("/opt/homebrew/bin/ffmpeg")) return "/opt/homebrew/bin/ffmpeg";
-  return "/usr/local/bin/ffmpeg";
-}
+export { localVideoPath, captureToolchain };
 
 export async function captureScreenAt(opts: {
   videoId: string;
@@ -46,29 +25,32 @@ export async function captureScreenAt(opts: {
     throw new Error("Need ffmpeg + tesseract on the machine to read the screen.");
   }
 
-  const root = join(process.cwd(), "data", "capture", opts.videoId);
+  const ffmpeg = ffmpegBin();
+  if (!ffmpeg) throw new Error("Need ffmpeg + tesseract on the machine to read the screen.");
+
+  const root = join(dataRoot(), "capture", opts.videoId);
   mkdirSync(root, { recursive: true });
   const stamp = Math.floor(opts.time);
   const frame = join(root, `frame_${stamp}_${process.pid}_${Date.now()}.png`);
   const media = await resolveMedia(opts.videoId, opts.time);
 
-  await exec(ffmpegBin(), [
-    "-y",
-    "-ss",
-    String(Math.max(0, media.offset)),
-    "-i",
-    media.path,
-    "-frames:v",
-    "1",
-    "-q:v",
-    "2",
-    frame,
-  ], { timeout: 30_000 });
+  // Window files are short: decode-seek so we don't need yt-dlp to re-encode keyframes.
+  const seek = String(Math.max(0, media.offset));
+  const ffmpegArgs =
+    media.kind === "window"
+      ? ["-y", "-i", media.path, "-ss", seek, "-frames:v", "1", "-q:v", "2", frame]
+      : ["-y", "-ss", seek, "-i", media.path, "-frames:v", "1", "-q:v", "2", frame];
+
+  await exec(ffmpeg, ffmpegArgs, { timeout: 30_000 });
 
   if (!existsSync(frame)) throw new Error("ffmpeg did not produce a frame.");
 
   const script = join(process.cwd(), "scripts", "ocr_frame.py");
-  const { stdout } = await exec(pythonBin(), [script, frame], { timeout: 30_000 });
+  const { stdout } = await exec(
+    pythonBin(),
+    [script, frame, tesseractBin() ?? "tesseract"],
+    { timeout: 30_000 },
+  );
   const raw = (stdout || "").trim();
   const filtered = extractCodeOnly(raw);
   // Never persist raw Tesseract. If the buffer read is chrome or garbage, bail.

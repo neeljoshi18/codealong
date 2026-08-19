@@ -1,6 +1,9 @@
 import { getJob } from "@/lib/db";
+import { canLiveOcr } from "@/lib/pipeline/binaries";
 import { mediaStatus } from "@/lib/pipeline/media";
 import { reconstructionForVideo } from "@/lib/pipeline/run";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(
   request: Request,
@@ -19,6 +22,7 @@ export async function GET(
     message: media.message || job?.message || rec?.message || "",
     snapshotCount: rec?.snapshots.length ?? 0,
     ready: Boolean(rec),
+    liveOcr: canLiveOcr(),
     media,
     reconstruction: rec,
   });

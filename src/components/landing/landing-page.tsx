@@ -65,8 +65,9 @@ export function LandingPage() {
         <p className="mt-5 max-w-xl text-[15px] leading-7 text-mute">
           The video is just YouTube. The bar at the bottom — or the E key — opens the
           file on screen beside the still-playing video. Edit it. Run JS or Python
-          in this tab. Esc goes back. No API key. Your browser caches a compact
-          copy in this tab and reads frames here; closing the tab frees that space.
+          in this tab. Esc goes back. No API key. Featured demos are instant. Other
+          links are read from the frame, which needs ffmpeg on this machine or the
+          droplet — not the Vercel demo host.
         </p>
 
         <form onSubmit={onSubmit} className="mt-10 flex gap-2">
@@ -86,7 +87,7 @@ export function LandingPage() {
 
         <section className="mt-16">
           <h2 className="mb-4 text-[11px] uppercase tracking-[0.18em] text-mute">
-            Instant demos — no API key. Any other link caches on this device, in this tab.
+            Instant demos — no API key. Any other link needs a machine that can download the file.
           </h2>
           <div className="grid gap-4 md:grid-cols-2">
             {FEATURED_TUTORIALS.map((t) => (

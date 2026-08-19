@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { emptyReconstruction } from "@/lib/reconstruction-stub";
 import { useStudio } from "@/lib/store";
 import type { ExperimentBranch, VideoReconstruction } from "@/lib/types";
 
@@ -11,52 +12,42 @@ export function useReconstruction(videoId: string) {
 
   useEffect(() => {
     resetSession(videoId);
+    if (useStudio.getState().reconstruction?.videoId !== videoId) {
+      hydrate(videoId, emptyReconstruction(videoId), []);
+    }
     let cancelled = false;
     let timer: number | undefined;
 
     async function pull() {
-      const res = await fetch(`/api/videos/${videoId}/status`);
-      if (!res.ok || cancelled) return;
-      const data = (await res.json()) as {
-        reconstruction?: VideoReconstruction;
-        ready?: boolean;
-        status?: string;
-      };
-      if (cancelled || !data.reconstruction) return;
-      const current = useStudio.getState().reconstruction;
-      if (!current || current.videoId !== videoId) {
-        const branches = await fetchBranches(videoId);
-        if (cancelled) return;
-        hydrate(videoId, data.reconstruction, branches);
-      } else {
+      try {
+        const res = await fetch(`/api/videos/${videoId}/status`);
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as {
+          reconstruction?: VideoReconstruction;
+        };
+        if (cancelled || !data.reconstruction) return;
         patchReconstruction(data.reconstruction);
+        const done = data.reconstruction.status === "ready" || data.reconstruction.status === "error";
+        if (!done) timer = window.setTimeout(pull, 900);
+      } catch {
+        /* keep the stub */
       }
-      const done = data.reconstruction.status === "ready" || data.reconstruction.status === "error";
-      if (!done) timer = window.setTimeout(pull, 900);
     }
 
     void (async () => {
-      const res = await fetch(`/api/videos/${videoId}`);
-      if (!res.ok || cancelled) return;
-      const data = (await res.json()) as { reconstruction: VideoReconstruction };
-      const branches = await fetchBranches(videoId);
-      if (cancelled) return;
-      hydrate(videoId, data.reconstruction, branches);
-      if (data.reconstruction.status !== "ready") {
-        timer = window.setTimeout(pull, 700);
-        return;
+      try {
+        const res = await fetch(`/api/videos/${videoId}`);
+        if (res.ok && !cancelled) {
+          const data = (await res.json()) as { reconstruction: VideoReconstruction };
+          const branches = await fetchBranches(videoId);
+          if (cancelled) return;
+          if (data.reconstruction) hydrate(videoId, data.reconstruction, branches);
+        }
+      } catch {
+        /* stub already on screen */
       }
-      // Seeds are ready instantly; keep polling briefly for live captions.
-      let enrich = 0;
-      const tick = async () => {
-        if (cancelled || enrich++ > 10) return;
-        const status = await fetch(`/api/videos/${videoId}/status`);
-        if (!status.ok || cancelled) return;
-        const next = (await status.json()) as { reconstruction?: VideoReconstruction };
-        if (next.reconstruction) patchReconstruction(next.reconstruction);
-        timer = window.setTimeout(() => void tick(), 1600);
-      };
-      timer = window.setTimeout(() => void tick(), 1200);
+      if (cancelled) return;
+      timer = window.setTimeout(pull, 1200);
     })();
 
     return () => {

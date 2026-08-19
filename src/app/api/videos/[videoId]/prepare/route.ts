@@ -1,10 +1,13 @@
 import { after } from "next/server";
 import { getJob } from "@/lib/db";
+import { canLiveOcr } from "@/lib/pipeline/binaries";
 import { ensureFullVideo, ensureWindow, mediaStatus } from "@/lib/pipeline/media";
-import { reconstructionForVideo } from "@/lib/pipeline/run";
+import { isEphemeralHost } from "@/lib/paths";
+import { loadOrStart, reconstructionForVideo } from "@/lib/pipeline/run";
 import { isSeeded } from "@/lib/seeds";
 
-export const maxDuration = 180;
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 export async function POST(
   request: Request,
@@ -18,19 +21,25 @@ export async function POST(
     return Response.json({
       videoId,
       seeded: true,
+      liveOcr: canLiveOcr(),
       media: mediaStatus(videoId, time),
       job: getJob(videoId),
     });
   }
 
-  after(() => {
-    void ensureWindow(videoId, time).catch(() => undefined);
-    if (body.full !== false) void ensureFullVideo(videoId).catch(() => undefined);
-  });
+  void loadOrStart(videoId);
+
+  if (!isEphemeralHost() && canLiveOcr()) {
+    after(() => {
+      void ensureWindow(videoId, time).catch(() => undefined);
+      if (body.full !== false) void ensureFullVideo(videoId).catch(() => undefined);
+    });
+  }
 
   return Response.json({
     videoId,
     seeded: false,
+    liveOcr: canLiveOcr(),
     media: mediaStatus(videoId, time),
     reconstruction: reconstructionForVideo(videoId),
     job: getJob(videoId),

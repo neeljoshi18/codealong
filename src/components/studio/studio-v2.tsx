@@ -66,7 +66,6 @@ export function StudioV2({ videoId }: { videoId: string }) {
   const liveNote = useStudio((s) => s.liveNote);
   const setLiveStatus = useStudio((s) => s.setLiveStatus);
   const bench = mode === "experiment";
-  const ready = rec !== null;
   const [note, setNote] = useState("");
   const [videoShare, setVideoShare] = useState(VIDEO_SHARE_DEFAULT);
   const dragRef = useRef<{ startX: number; startShare: number } | null>(null);
@@ -258,7 +257,7 @@ export function StudioV2({ videoId }: { videoId: string }) {
 
       {!bench && (
         <div className="absolute inset-x-0 bottom-0 z-30 border-t border-line bg-bar">
-          {cache.progress < 100 ? (
+          {cache.liveOcr && cache.progress < 100 ? (
             <div className="h-0.5 w-full bg-white/10">
               <div
                 className="h-full bg-zinc-200 transition-[width] duration-300"
@@ -273,17 +272,18 @@ export function StudioV2({ videoId }: { videoId: string }) {
             <button
               type="button"
               onClick={() => void openAtScreen()}
-              disabled={!ready}
-              className="rounded-md bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-40"
+              className="rounded-md bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-white"
             >
-              {ready ? `Open editor at ${formatTime(videoTime)}` : "Loading…"}
+              Open editor at {formatTime(videoTime)}
             </button>
             <div className="flex items-center gap-2">
               {themeToggle}
               <span className="hidden max-w-[280px] truncate text-[11px] text-mute sm:inline">
-                {cache.progress < 100
+                {cache.liveOcr === false
                   ? cache.message
-                  : note || "E · reads this frame, then opens the editor"}
+                  : cache.progress < 100
+                    ? cache.message
+                    : note || "E · reads this frame, then opens the editor"}
               </span>
             </div>
           </div>

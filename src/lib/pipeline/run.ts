@@ -8,7 +8,10 @@ import { isCleanSnapshot } from "@/lib/pipeline/code-from-ocr";
 import { classifyTutorial } from "@/lib/pipeline/code-story";
 import { reconstructWindow, snapshotsFromChunk } from "@/lib/pipeline/reconstruct-from-transcript";
 import { mergeSnapshotStreams } from "@/lib/pipeline/consolidate";
+import { emptyReconstruction } from "@/lib/reconstruction-stub";
 import type { CodeSnapshot, VideoReconstruction } from "@/lib/types";
+
+export { emptyReconstruction };
 
 /** Only reconstruct this far ahead of the playhead. */
 export const HORIZON_AHEAD = 180;
@@ -35,9 +38,7 @@ export async function loadOrStart(videoId: string): Promise<VideoReconstruction>
   const cached = getCachedReconstruction(videoId);
 
   if (seed) {
-    const merged = hydrateSeed(videoId, seed, cached);
-    void refreshTranscript(merged);
-    return merged;
+    return hydrateSeed(videoId, seed, cached);
   }
 
   if (cached) {
@@ -45,17 +46,28 @@ export async function loadOrStart(videoId: string): Promise<VideoReconstruction>
     if (cleaned.snapshots.length !== cached.snapshots.length) {
       saveReconstruction(cleaned);
     }
-    if ((cleaned.snapshots?.length ?? 0) === 0 && cleaned.status !== "error") {
-      void ensureHorizon(videoId, 0);
-    }
     return cleaned;
   }
 
   const stub = emptyReconstruction(videoId);
   saveReconstruction(stub);
-  upsertJob(videoId, { status: "queued", progress: 1, message: "Queued" });
-  void ensureHorizon(videoId, 0);
+  upsertJob(videoId, { status: "ready", progress: 100, message: stub.message });
   return stub;
+}
+
+export async function refreshMetadata(videoId: string): Promise<void> {
+  const rec = getCachedReconstruction(videoId) ?? emptyReconstruction(videoId);
+  if (rec.duration > 0 && rec.title !== "YouTube") return;
+  try {
+    const oembed = await fetchOEmbed(videoId);
+    if (!oembed) return;
+    rec.title = oembed.title ?? rec.title;
+    rec.channel = oembed.author_name ?? rec.channel;
+    rec.thumbnailUrl = oembed.thumbnail_url ?? rec.thumbnailUrl ?? thumbnailUrl(videoId);
+    saveReconstruction(rec);
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function ensureHorizon(videoId: string, aroundTime: number): Promise<VideoReconstruction> {
@@ -72,27 +84,6 @@ export async function ensureHorizon(videoId: string, aroundTime: number): Promis
   });
   running.set(key, promise);
   return promise;
-}
-
-function emptyReconstruction(videoId: string): VideoReconstruction {
-  return {
-    videoId,
-    title: "Loading video…",
-    channel: "YouTube",
-    duration: 0,
-    language: "plaintext",
-    tutorialGoalSummary: "",
-    inferredProjectStructure: { files: [], description: "", language: "plaintext" },
-    snapshots: [],
-    transcript: [],
-    source: "partial",
-    status: "queued",
-    progress: 1,
-    message: "Starting extraction…",
-    editorTheme: "chronos-dark",
-    processedRanges: [],
-    horizonEnd: 0,
-  };
 }
 
 function isSyntheticTranscript(
@@ -154,17 +145,6 @@ function hydrateSeed(
   return rec;
 }
 
-async function refreshTranscript(rec: VideoReconstruction) {
-  try {
-    const cues = await fetchTranscript(rec.videoId);
-    if (cues.length < 8) return;
-    rec.transcript = cues;
-    saveReconstruction(rec);
-  } catch {
-    // ignore
-  }
-}
-
 function mergeRanges(ranges: { start: number; end: number }[]): { start: number; end: number }[] {
   const sorted = [...ranges].sort((a, b) => a.start - b.start);
   const out: { start: number; end: number }[] = [];
@@ -203,7 +183,7 @@ function uncoveredWindows(
 async function extendHorizon(videoId: string, aroundTime: number): Promise<VideoReconstruction> {
   let rec = getCachedReconstruction(videoId) ?? emptyReconstruction(videoId);
 
-  if (!rec.transcript.length || rec.duration === 0 || rec.title === "Loading video…") {
+  if (!rec.transcript.length || rec.duration === 0 || rec.title === "YouTube" || rec.title === "Loading video…") {
     upsertJob(videoId, { status: "fetching", progress: 4, message: "Fetching metadata…" });
     const [oembed, player, transcript] = await Promise.all([
       fetchOEmbed(videoId),

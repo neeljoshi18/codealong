@@ -2,10 +2,14 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { upsertJob } from "@/lib/db";
+import { MEDIA_WINDOW_SEC, windowStartFor } from "@/lib/media-window";
+import { dataRoot, isEphemeralHost } from "@/lib/paths";
+import { denoBin, pythonBin } from "@/lib/pipeline/binaries";
 import { isSeeded } from "@/lib/seeds";
 
-const WINDOW_SEC = 30;
-const videosDir = () => join(process.cwd(), "data", "videos");
+export { windowStartFor, MEDIA_WINDOW_SEC };
+
+const videosDir = () => join(dataRoot(), "videos");
 
 export function localVideoPath(videoId: string): string {
   return join(videosDir(), `${videoId}.mp4`);
@@ -13,25 +17,6 @@ export function localVideoPath(videoId: string): string {
 
 function windowPath(videoId: string, start: number): string {
   return join(videosDir(), `${videoId}.w${start}.mp4`);
-}
-
-export function windowStartFor(time: number): number {
-  return Math.max(0, Math.floor(time / WINDOW_SEC) * WINDOW_SEC);
-}
-
-function pythonBin(): string {
-  const candidates = [
-    "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
-    "/usr/local/bin/python3",
-    "/opt/homebrew/bin/python3",
-    "python3",
-  ];
-  return candidates.find((p) => p === "python3" || existsSync(p)) ?? "python3";
-}
-
-function denoBin(): string | null {
-  const p = join(process.env.HOME ?? "", ".deno/bin/deno");
-  return existsSync(p) ? p : null;
 }
 
 function usableFile(path: string): boolean {
@@ -54,6 +39,14 @@ const fullJobs = new Map<string, Promise<string>>();
 const windowJobs = new Map<string, Promise<string>>();
 
 export function mediaStatus(videoId: string, time = 0): MediaStatus {
+  if (isEphemeralHost()) {
+    return {
+      full: false,
+      progress: 0,
+      message: "This host cannot download videos (no ffmpeg). Featured demos still work.",
+      windowStart: null,
+    };
+  }
   const full = usableFile(localVideoPath(videoId));
   const start = windowStartFor(time);
   const win = usableFile(windowPath(videoId, start));
@@ -87,10 +80,16 @@ function ytDlpBaseArgs(dest: string): string[] {
     "-m",
     "yt_dlp",
     "-f",
-    "18/136/best[height<=720]",
+    "18/best[height<=360]/best[height<=720]",
     "--no-playlist",
     "--no-warnings",
     "--newline",
+    "--retries",
+    "2",
+    "--socket-timeout",
+    "15",
+    "--extractor-args",
+    "youtube:player_client=android,ios,web",
     "--remote-components",
     "ejs:github",
     "-o",
@@ -106,6 +105,7 @@ function runYtDlp(
   dest: string,
   onProgress?: (pct: number) => void,
   cookies = false,
+  timeoutMs = 50_000,
 ): Promise<void> {
   const args = ytDlpBaseArgs(dest);
   if (cookies) {
@@ -120,35 +120,42 @@ function runYtDlp(
       const m = text.match(/\[download\]\s+(\d{1,3}(?:\.\d+)?)%/);
       if (m && onProgress) onProgress(Number(m[1]));
     };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`yt-dlp timed out after ${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
     child.stdout.on("data", onData);
     child.stderr.on("data", onData);
-    child.on("error", reject);
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
     child.on("close", (code) => {
+      clearTimeout(timer);
       if (code === 0) resolve();
       else reject(new Error(`yt-dlp exited ${code}`));
     });
   });
 }
 
-async function downloadTo(dest: string, extra: string[], videoId: string, lo: number, hi: number) {
+async function downloadTo(dest: string, extra: string[], videoId: string, lo: number, hi: number, timeoutMs: number) {
   mkdirSync(videosDir(), { recursive: true });
-  const report = (pct: number) => setStatus(videoId, Math.round(lo + (pct / 100) * (hi - lo)), status.get(videoId)?.message ?? "Downloading…");
-  try {
-    await runYtDlp(extra, dest, report, false);
-  } catch {
-    await runYtDlp(extra, dest, report, true);
-  }
+  const report = (pct: number) =>
+    setStatus(videoId, Math.round(lo + (pct / 100) * (hi - lo)), status.get(videoId)?.message ?? "Downloading…");
+  const cookies = Boolean(process.env.YTDLP_COOKIES_FROM_BROWSER) && !isEphemeralHost();
+  await runYtDlp(extra, dest, report, cookies, timeoutMs);
   if (!usableFile(dest)) throw new Error("Download did not produce a usable file.");
 }
 
 export async function ensureFullVideo(videoId: string): Promise<string> {
+  if (isEphemeralHost()) throw new Error("Cannot download video on this host.");
   const dest = localVideoPath(videoId);
   if (usableFile(dest)) return dest;
   const existing = fullJobs.get(videoId);
   if (existing) return existing;
   const job = (async () => {
     setStatus(videoId, 12, "Downloading a compact copy for screen reads…");
-    await downloadTo(dest, ["--", videoId], videoId, 12, 96);
+    await downloadTo(dest, ["--", videoId], videoId, 12, 96, 120_000);
     setStatus(videoId, 100, "Cached on this machine");
     return dest;
   })().finally(() => {
@@ -159,6 +166,7 @@ export async function ensureFullVideo(videoId: string): Promise<string> {
 }
 
 export async function ensureWindow(videoId: string, time: number): Promise<string> {
+  if (isEphemeralHost()) throw new Error("Cannot download video on this host.");
   const start = windowStartFor(time);
   const dest = windowPath(videoId, start);
   if (usableFile(dest)) return dest;
@@ -166,14 +174,15 @@ export async function ensureWindow(videoId: string, time: number): Promise<strin
   const existing = windowJobs.get(key);
   if (existing) return existing;
   const job = (async () => {
-    const end = start + WINDOW_SEC + 4;
+    const end = start + MEDIA_WINDOW_SEC + 2;
     setStatus(videoId, 8, `Fetching ${fmt(start)}–${fmt(end)}…`);
     await downloadTo(
       dest,
-      ["--download-sections", `*${start}-${end}`, "--force-keyframes-at-cuts", "--", videoId],
+      ["--download-sections", `*${start}-${end}`, "--", videoId],
       videoId,
       8,
       88,
+      50_000,
     );
     setStatus(videoId, 90, "This moment is ready");
     return dest;
@@ -190,6 +199,7 @@ export async function resolveMedia(
 ): Promise<{ path: string; offset: number; kind: "full" | "window" }> {
   const full = localVideoPath(videoId);
   if (usableFile(full)) return { path: full, offset: Math.max(0, time), kind: "full" };
+  if (isEphemeralHost()) throw new Error("Cannot download video on this host.");
   void ensureFullVideo(videoId).catch(() => {
     /* background; window still works */
   });

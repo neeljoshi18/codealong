@@ -60,8 +60,9 @@ def main() -> int:
         print("usage: ocr_frame.py <image>", file=sys.stderr)
         return 2
     prepared = prepare(Path(sys.argv[1]))
+    tess = sys.argv[2] if len(sys.argv) > 2 else "tesseract"
     proc = subprocess.run(
-        ["tesseract", str(prepared), "stdout", "--psm", "6", "-c", "preserve_interword_spaces=1"],
+        [tess, str(prepared), "stdout", "--psm", "6", "-c", "preserve_interword_spaces=1"],
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
