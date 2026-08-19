@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
     "youtube-transcript",
     "openai",
   ],
+  transpilePackages: ["youtubei.js", "tesseract.js"],
   turbopack: {
     root: process.cwd(),
   },

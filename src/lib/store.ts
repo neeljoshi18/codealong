@@ -2,10 +2,12 @@
 
 import { create } from "zustand";
 import { nanoid } from "nanoid";
-import { clamp } from "@/lib/utils";
+import { clamp, filesFingerprint } from "@/lib/utils";
+import { filesForMoment, mergeEvolving, preferredActiveFile } from "@/lib/pipeline/code-story";
 import { findSnapshotIndex, snapshotAt } from "@/lib/snapshots";
 import type {
   AiMode,
+  Appearance,
   ChatMessage,
   CodeSnapshot,
   ExecutionResult,
@@ -46,6 +48,9 @@ interface StudioState {
   aiBusy: boolean;
   seekRequest: { time: number; token: number } | null;
   playbackRequest: { action: "play" | "pause" | "toggle"; token: number } | null;
+  appearance: Appearance;
+  liveReading: boolean;
+  liveNote: string;
 
   resetSession: (videoId: string) => void;
   hydrate: (videoId: string, rec: VideoReconstruction, branches?: ExperimentBranch[]) => void;
@@ -76,6 +81,10 @@ interface StudioState {
   setAiBusy: (busy: boolean) => void;
   requestSeek: (time: number) => void;
   requestPlayback: (action: "play" | "pause" | "toggle") => void;
+  applyLiveSnapshot: (snap: CodeSnapshot) => void;
+  resumeFollow: () => void;
+  setAppearance: (appearance: Appearance) => void;
+  setLiveStatus: (liveReading: boolean, liveNote?: string) => void;
 }
 
 export const useStudio = create<StudioState>((set, get) => ({
@@ -105,6 +114,9 @@ export const useStudio = create<StudioState>((set, get) => ({
   aiBusy: false,
   seekRequest: null,
   playbackRequest: null,
+  appearance: "dark",
+  liveReading: false,
+  liveNote: "",
 
   resetSession: (videoId) => {
     if (get().videoId === videoId && get().reconstruction) return;
@@ -132,6 +144,8 @@ export const useStudio = create<StudioState>((set, get) => ({
       aiOpen: false,
       aiMessages: [],
       aiBusy: false,
+      liveReading: false,
+      liveNote: "",
     });
   },
 
@@ -184,13 +198,48 @@ export const useStudio = create<StudioState>((set, get) => ({
   },
 
   setVideoTime: (t) => {
-    const { followVideo, mode } = get();
+    const state = get();
     const next: Partial<StudioState> = { videoTime: t };
-    if (followVideo && mode === "watch") {
+    if (state.followVideo) {
       next.codeTime = t;
-      const snap = currentSnapshotFrom(get().reconstruction, t);
-      if (snap && get().activeFile && snap.files[get().activeFile] === undefined) {
-        next.activeFile = snap.activeFile;
+      const rec = state.reconstruction;
+      const snap = currentSnapshotFrom(rec, t);
+      if (snap && rec) {
+        if (state.mode === "watch") {
+          if (state.activeFile && snap.files[state.activeFile] === undefined) {
+            next.activeFile = snap.activeFile;
+          }
+        } else if (state.mode === "experiment" && !state.experimentDirty) {
+          if (t < 1.5 && state.experimentSourceTime > 8) {
+            set(next);
+            return;
+          }
+          const files = filesForMoment(rec.snapshots, t, snap, rec.tutorialKind);
+          if (rec.tutorialKind === "evolving") {
+            const out = { ...state.experimentFiles };
+            let changed = false;
+            for (const [file, incoming] of Object.entries(files)) {
+              const merged = mergeEvolving(out[file] ?? "", incoming).code;
+              if (merged !== (out[file] ?? "")) {
+                out[file] = merged;
+                changed = true;
+              }
+            }
+            if (changed) {
+              const active = preferredActiveFile(out, snap, state.experimentActiveFile);
+              next.experimentFiles = out;
+              next.experimentSourceTime = Math.max(state.experimentSourceTime, snap.timestamp);
+              next.experimentActiveFile = active;
+              next.activeFile = active;
+            }
+          } else if (filesFingerprint(files) !== filesFingerprint(state.experimentFiles)) {
+            const active = preferredActiveFile(files, snap, state.experimentActiveFile);
+            next.experimentFiles = files;
+            next.experimentSourceTime = snap.timestamp;
+            next.experimentActiveFile = active;
+            next.activeFile = active;
+          }
+        }
       }
     }
     set(next);
@@ -266,18 +315,19 @@ export const useStudio = create<StudioState>((set, get) => ({
 
   openWorkbench: (forced) => {
     const t = get().videoTime;
-    const snap = forced ?? currentSnapshotFrom(get().reconstruction, t);
-    const files = { ...(snap?.files ?? {}) };
-    const active = snap?.activeFile ?? Object.keys(files)[0] ?? "";
+    const rec = get().reconstruction;
+    const snap = forced ?? currentSnapshotFrom(rec, t);
+    const files = rec && snap ? filesForMoment(rec.snapshots, snap.timestamp, snap, rec.tutorialKind) : { ...(snap?.files ?? {}) };
+    const active = snap ? preferredActiveFile(files, snap, "") : Object.keys(files)[0] ?? "";
     set({
       mode: "experiment",
-      followVideo: false,
-      codeTime: forced?.timestamp ?? t,
+      followVideo: true,
+      codeTime: snap?.timestamp ?? t,
       activeFile: active,
       experimentFiles: files,
       experimentActiveFile: active,
       experimentDirty: false,
-      experimentSourceTime: forced?.timestamp ?? t,
+      experimentSourceTime: snap?.timestamp ?? t,
       runResult: null,
       selectedText: "",
       selectionAnchor: null,
@@ -289,6 +339,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       mode: "watch",
       experimentDirty: false,
       runResult: null,
+      liveReading: false,
     }),
 
   updateExperimentFile: (file, value) =>
@@ -357,6 +408,70 @@ export const useStudio = create<StudioState>((set, get) => ({
 
   requestPlayback: (action) =>
     set({ playbackRequest: { action, token: Date.now() } }),
+
+  applyLiveSnapshot: (snap) => {
+    const state = get();
+    if (state.mode !== "experiment" || state.experimentDirty) return;
+    const rec = state.reconstruction;
+    const evolving = rec?.tutorialKind === "evolving";
+    let files: Record<string, string>;
+    if (evolving) {
+      const file = snap.activeFile || state.experimentActiveFile;
+      const incoming = snap.files[file] ?? Object.values(snap.files)[0] ?? "";
+      const prev = state.experimentFiles[file] ?? "";
+      const merged = mergeEvolving(prev, incoming);
+      files = { ...state.experimentFiles, [file]: merged.code };
+    } else {
+      files = rec ? filesForMoment(rec.snapshots, snap.timestamp, snap, rec.tutorialKind) : { ...snap.files };
+    }
+    if (filesFingerprint(files) === filesFingerprint(state.experimentFiles)) {
+      set({ experimentSourceTime: snap.timestamp, codeTime: snap.timestamp });
+      return;
+    }
+    const active = preferredActiveFile(files, snap, state.experimentActiveFile);
+    set({
+      experimentFiles: files,
+      experimentActiveFile: active,
+      activeFile: active,
+      experimentSourceTime: snap.timestamp,
+      codeTime: snap.timestamp,
+    });
+  },
+
+  resumeFollow: () => {
+    const state = get();
+    const rec = state.reconstruction;
+    const t = state.videoTime;
+    const snap = currentSnapshotFrom(rec, t);
+    const files = rec && snap ? filesForMoment(rec.snapshots, t, snap, rec.tutorialKind) : state.experimentFiles;
+    const active = snap?.activeFile ?? state.experimentActiveFile;
+    set({
+      followVideo: true,
+      experimentDirty: false,
+      experimentFiles: files,
+      experimentActiveFile: files[active] !== undefined ? active : (snap?.activeFile ?? state.experimentActiveFile),
+      experimentSourceTime: snap?.timestamp ?? t,
+      codeTime: snap?.timestamp ?? t,
+    });
+  },
+
+  setAppearance: (appearance) => {
+    set({ appearance });
+    if (typeof document !== "undefined") {
+      document.documentElement.dataset.theme = appearance;
+      try {
+        window.localStorage.setItem("codealong-theme", appearance);
+      } catch {
+        /* ignore */
+      }
+    }
+  },
+
+  setLiveStatus: (liveReading, liveNote) =>
+    set((s) => ({
+      liveReading,
+      liveNote: liveNote === undefined ? s.liveNote : liveNote,
+    })),
 }));
 
 function currentSnapshotFrom(

@@ -30,10 +30,10 @@ export function FileTabs() {
               mode === "experiment" ? setExperimentActiveFile(file) : setActiveFile(file)
             }
             className={cn(
-              "max-w-[180px] truncate border-r border-white/6 px-3 py-1.5 text-[12px]",
+              "max-w-[180px] truncate border-r border-line px-3 py-1.5 text-[12px]",
               on
-                ? "bg-[#0e1116] text-paper"
-                : "bg-[#0a0c10] text-mute hover:text-paper",
+                ? "bg-pane text-paper"
+                : "bg-bar text-mute hover:text-paper",
             )}
           >
             {file}

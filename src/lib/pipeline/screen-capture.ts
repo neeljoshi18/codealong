@@ -3,11 +3,14 @@ import { promisify } from "node:util";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { completeText, hasXaiKey } from "@/lib/ai/client";
-import { extractCodeOnly, isCleanCode } from "@/lib/pipeline/code-from-ocr";
+import { extractCodeOnly, isCleanSnapshot, isUsableCode } from "@/lib/pipeline/code-from-ocr";
+import { localVideoPath, resolveMedia } from "@/lib/pipeline/media";
 import { windowTranscript } from "@/lib/transcript-window";
 import type { CodeSnapshot, TranscriptCue } from "@/lib/types";
 
 const exec = promisify(execFile);
+
+export { localVideoPath };
 
 function pythonBin(): string {
   const candidates = [
@@ -17,15 +20,6 @@ function pythonBin(): string {
     "python3",
   ];
   return candidates.find((p) => p === "python3" || existsSync(p)) ?? "python3";
-}
-
-function denoBin(): string | null {
-  const p = join(process.env.HOME ?? "", ".deno/bin/deno");
-  return existsSync(p) ? p : null;
-}
-
-export function localVideoPath(videoId: string): string {
-  return join(process.cwd(), "data", "videos", `${videoId}.mp4`);
 }
 
 export function captureToolchain(): { ytDlp: boolean; ffmpeg: boolean; tesseract: boolean } {
@@ -39,35 +33,6 @@ export function captureToolchain(): { ytDlp: boolean; ffmpeg: boolean; tesseract
 function ffmpegBin(): string {
   if (existsSync("/opt/homebrew/bin/ffmpeg")) return "/opt/homebrew/bin/ffmpeg";
   return "/usr/local/bin/ffmpeg";
-}
-
-async function ensureLocalVideo(videoId: string): Promise<string> {
-  const dest = localVideoPath(videoId);
-  if (existsSync(dest)) return dest;
-  mkdirSync(join(process.cwd(), "data", "videos"), { recursive: true });
-
-  const args = [
-    "-m",
-    "yt_dlp",
-    "-f",
-    "18/136/best[height<=720]",
-    "--no-playlist",
-    "--remote-components",
-    "ejs:github",
-    "-o",
-    dest,
-  ];
-  const deno = denoBin();
-  if (deno) args.push("--js-runtimes", `deno:${deno}`);
-  const browser = process.env.YTDLP_COOKIES_FROM_BROWSER ?? "chrome";
-  if (browser) args.push("--cookies-from-browser", browser);
-  args.push("--", videoId);
-
-  await exec(pythonBin(), args, { timeout: 300_000 });
-  if (!existsSync(dest)) {
-    throw new Error("Could not download the video. Set YTDLP_COOKIES_FROM_BROWSER=chrome and install deno.");
-  }
-  return dest;
 }
 
 export async function captureScreenAt(opts: {
@@ -84,15 +49,15 @@ export async function captureScreenAt(opts: {
   const root = join(process.cwd(), "data", "capture", opts.videoId);
   mkdirSync(root, { recursive: true });
   const stamp = Math.floor(opts.time);
-  const frame = join(root, `frame_${stamp}.png`);
-  const source = await ensureLocalVideo(opts.videoId);
+  const frame = join(root, `frame_${stamp}_${process.pid}_${Date.now()}.png`);
+  const media = await resolveMedia(opts.videoId, opts.time);
 
   await exec(ffmpegBin(), [
     "-y",
     "-ss",
-    String(Math.max(0, opts.time)),
+    String(Math.max(0, media.offset)),
     "-i",
-    source,
+    media.path,
     "-frames:v",
     "1",
     "-q:v",
@@ -106,17 +71,29 @@ export async function captureScreenAt(opts: {
   const { stdout } = await exec(pythonBin(), [script, frame], { timeout: 30_000 });
   const raw = (stdout || "").trim();
   const filtered = extractCodeOnly(raw);
-  if (!filtered.code || filtered.score < 3 || !isCleanCode(filtered.code)) {
+  // Never persist raw Tesseract. If the buffer read is chrome or garbage, bail.
+  if (!filtered.code || filtered.score < 2 || !isUsableCode(filtered.code)) {
+    writeFileSync(join(root, `ocr_${stamp}.txt`), `${raw}\n\n--- rejected ---\n${filtered.code}\n`);
     throw new Error("FRAME_NOT_CODE");
   }
 
-  const language = opts.language ?? guessLang(filtered.code);
-  const file = language === "python" ? "app.py" : language === "html" ? "index.html" : "index.js";
+  const language = opts.language && opts.language !== "plaintext" ? opts.language : guessLang(filtered.code);
+  const file =
+    language === "python"
+      ? "app.py"
+      : language === "html"
+        ? "index.html"
+        : language === "cpp" || language === "c++"
+          ? "main.cpp"
+          : "index.js";
   const cleaned = hasXaiKey()
     ? await cleanOcr({ raw: filtered.code, language, file, time: opts.time, cues: opts.cues ?? [] })
     : filtered.code;
 
-  if (!isCleanCode(cleaned)) throw new Error("FRAME_NOT_CODE");
+  if (!isUsableCode(cleaned)) {
+    writeFileSync(join(root, `ocr_${stamp}.txt`), `${raw}\n\n--- rejected-clean ---\n${cleaned}\n`);
+    throw new Error("FRAME_NOT_CODE");
+  }
 
   writeFileSync(join(root, `ocr_${stamp}.txt`), `${raw}\n\n--- kept ---\n${cleaned}\n`);
 
@@ -133,6 +110,7 @@ export async function captureScreenAt(opts: {
 
 function guessLang(text: string): string {
   if (/^\s*</m.test(text) && /<\/?[a-z]+/i.test(text)) return "html";
+  if (/#include\b|std::|int\s+main\s*\(/.test(text)) return "cpp";
   if (/\bdef\s+\w+\s*\(|\bimport\s+\w+|print\(/.test(text)) return "python";
   return "javascript";
 }
@@ -171,6 +149,9 @@ export function nearbyOcrSnapshot(
   let bestD = Infinity;
   for (const s of snapshots) {
     if (s.origin !== "ocr" && s.origin !== "cleaned") continue;
+    if (!isCleanSnapshot(s)) continue;
+    // Never jump the live buffer to a future seed/OCR hop.
+    if (s.timestamp > time + 1.5) continue;
     const d = Math.abs(s.timestamp - time);
     if (d < bestD && d <= radius) {
       best = s;

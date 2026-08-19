@@ -11,8 +11,7 @@ export function consolidateSnapshots(input: CodeSnapshot[]): CodeSnapshot[] {
     const fp = filesFingerprint(snap.files);
     const tooClose = snap.timestamp - lastTs < 0.75 && fp === lastFp;
     if (fp === lastFp && tooClose) continue;
-    if (fp === lastFp && out.length > 0) {
-      // keep the later identical frame only if the label changed
+    if (fp === lastFp && out.length > 0 && snap.timestamp - lastTs < 8) {
       if (out[out.length - 1].label === snap.label) continue;
     }
     out.push(snap);

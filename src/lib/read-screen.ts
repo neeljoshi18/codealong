@@ -1,0 +1,86 @@
+import { isUsableSnapshot } from "@/lib/pipeline/code-from-ocr";
+import { isSeeded } from "@/lib/seeds";
+import type { CodeSnapshot, VideoReconstruction } from "@/lib/types";
+
+export type ScreenRead = {
+  reconstruction?: VideoReconstruction;
+  snapshot: CodeSnapshot | null;
+  cached?: boolean;
+  note?: string;
+  error?: string;
+};
+
+async function readOnServer(
+  videoId: string,
+  time: number,
+  opts?: { live?: boolean; force?: boolean; signal?: AbortSignal },
+): Promise<ScreenRead> {
+  const res = await fetch(`/api/videos/${videoId}/capture`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      time,
+      live: Boolean(opts?.live),
+      force: Boolean(opts?.force),
+    }),
+    signal: opts?.signal,
+  });
+  const data = (await res.json()) as ScreenRead;
+  const snap = data.snapshot && isUsableSnapshot(data.snapshot) ? data.snapshot : null;
+  return { ...data, snapshot: snap };
+}
+
+async function readOnDevice(
+  videoId: string,
+  time: number,
+  rec: VideoReconstruction | null,
+  signal?: AbortSignal,
+): Promise<ScreenRead | null> {
+  const { captureInBrowser } = await import("@/lib/client-engine/capture");
+  const data = await captureInBrowser(videoId, time, rec, signal);
+  const snap = data.snapshot && isUsableSnapshot(data.snapshot) ? data.snapshot : null;
+  return snap ? { snapshot: snap, cached: data.cached } : null;
+}
+
+export async function readScreen(
+  videoId: string,
+  time: number,
+  opts?: { live?: boolean; force?: boolean; signal?: AbortSignal },
+): Promise<ScreenRead> {
+  const rec =
+    typeof window === "undefined"
+      ? null
+      : (await import("@/lib/store")).useStudio.getState().reconstruction;
+
+  const tryDevice = async () => {
+    try {
+      return await readOnDevice(videoId, time, rec, opts?.signal);
+    } catch {
+      return null;
+    }
+  };
+  const tryServer = async () => {
+    try {
+      return await readOnServer(videoId, time, opts);
+    } catch {
+      return null;
+    }
+  };
+
+  if (!isSeeded(videoId)) {
+    const device = await tryDevice();
+    if (device?.snapshot) return device;
+    const server = await tryServer();
+    if (server?.snapshot) return server;
+    return {
+      snapshot: null,
+      note: "This tab couldn't fetch the video file (YouTube blocks browsers). Featured demos still work.",
+    };
+  }
+
+  const server = await tryServer();
+  if (server?.snapshot) return server;
+  const device = await tryDevice();
+  if (device?.snapshot) return device;
+  return server ?? { snapshot: null, note: "Couldn't read this frame." };
+}

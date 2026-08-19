@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor as MonacoNS, IDisposable } from "monaco-editor";
-import { languageFromPath } from "@/lib/utils";
+import { applyModelText } from "@/lib/monaco-apply";
+import { filesFingerprint, languageFromPath } from "@/lib/utils";
 import { selectCurrentSnapshot, useStudio } from "@/lib/store";
 
 type Monaco = typeof import("monaco-editor");
@@ -51,6 +52,26 @@ function defineThemes(monaco: Monaco) {
       "editorGutter.background": "#0d1117",
     },
   });
+  monaco.editor.defineTheme("chronos-light", {
+    base: "vs",
+    inherit: true,
+    rules: [
+      { token: "comment", foreground: "6b7280", fontStyle: "italic" },
+      { token: "string", foreground: "0f766e" },
+      { token: "keyword", foreground: "7c3aed" },
+      { token: "number", foreground: "b45309" },
+    ],
+    colors: {
+      "editor.background": "#ffffff",
+      "editor.foreground": "#1a1d23",
+      "editorLineNumber.foreground": "#9aa1ad",
+      "editorLineNumber.activeForeground": "#4b5160",
+      "editor.selectionBackground": "#93c5fd88",
+      "editor.lineHighlightBackground": "#f3f4f6",
+      "editorCursor.foreground": "#1d4ed8",
+      "editorGutter.background": "#ffffff",
+    },
+  });
 }
 
 export function MonacoStage({
@@ -65,11 +86,15 @@ export function MonacoStage({
   const monacoRef = useRef<Monaco | null>(null);
   const modelsRef = useRef<Map<string, MonacoNS.ITextModel>>(new Map());
   const applyingRef = useRef(false);
+  const applyGen = useRef(0);
+  const applySignal = useRef({ cancelled: false });
   const pendingDelta = useRef(0);
   const rafRef = useRef(0);
 
   const mode = useStudio((s) => s.mode);
-  const theme = useStudio((s) => s.reconstruction?.editorTheme ?? "chronos-dark");
+  const theme = useStudio((s) =>
+    s.appearance === "light" ? "chronos-light" : (s.reconstruction?.editorTheme ?? "chronos-dark"),
+  );
   const duration = useStudio((s) => s.duration || s.reconstruction?.duration || 0);
   const nudgeCodeTime = useStudio((s) => s.nudgeCodeTime);
   const updateExperimentFile = useStudio((s) => s.updateExperimentFile);
@@ -77,10 +102,10 @@ export function MonacoStage({
 
   const visibleKey = useStudio((s) => {
     if (s.mode === "experiment") {
-      return `exp:${s.experimentActiveFile}:${Object.keys(s.experimentFiles).join(",")}`;
+      return `exp:${s.experimentActiveFile}:${filesFingerprint(s.experimentFiles)}`;
     }
     const snap = selectCurrentSnapshot(s);
-    return snap ? `${snap.id}::${s.activeFile}` : "none";
+    return snap ? `${snap.id}::${s.activeFile}::${filesFingerprint(snap.files)}` : "none";
   });
 
   const applyVisible = useCallback(() => {
@@ -95,19 +120,32 @@ export function MonacoStage({
     const active =
       state.mode === "experiment" ? state.experimentActiveFile : state.activeFile;
 
+    applySignal.current.cancelled = true;
+    applySignal.current = { cancelled: false };
+    const signal = applySignal.current;
+    applyingRef.current = true;
+    applyGen.current += 1;
+    const live = state.mode === "experiment" && state.followVideo && !state.experimentDirty;
+
     for (const [path, value] of Object.entries(files)) {
-      let model = modelsRef.current.get(path);
+      const uri = monaco.Uri.parse(`inmemory://codechronos/${encodeURIComponent(path)}`);
+      let model = modelsRef.current.get(path) ?? monaco.editor.getModel(uri);
       if (!model || model.isDisposed()) {
-        model = monaco.editor.createModel(
-          value,
-          languageFromPath(path),
-          monaco.Uri.parse(`inmemory://codechronos/${encodeURIComponent(path)}`),
-        );
+        model = monaco.editor.createModel(value, languageFromPath(path), uri);
         modelsRef.current.set(path, model);
-      } else if (model.getValue() !== value) {
-        applyingRef.current = true;
-        model.setValue(value);
-        applyingRef.current = false;
+      } else {
+        modelsRef.current.set(path, model);
+        if (model.getValue() !== value) {
+          if (path === active) {
+            try {
+              applyModelText(editor, model, value, { animate: live, signal });
+            } catch {
+              model.setValue(value);
+            }
+          } else {
+            model.setValue(value);
+          }
+        }
       }
     }
 
@@ -115,6 +153,9 @@ export function MonacoStage({
     if (next && editor.getModel() !== next) {
       editor.setModel(next);
     }
+    window.setTimeout(() => {
+      if (!signal.cancelled) applyingRef.current = false;
+    }, live ? 700 : 0);
     editor.updateOptions({
       readOnly: state.mode !== "experiment",
       domReadOnly: false,
@@ -124,6 +165,20 @@ export function MonacoStage({
   useEffect(() => {
     applyVisible();
   }, [visibleKey, applyVisible, mode]);
+
+  useEffect(() => {
+    const models = modelsRef.current;
+    return () => {
+      for (const model of models.values()) {
+        try {
+          model.dispose();
+        } catch {
+          /* already gone */
+        }
+      }
+      models.clear();
+    };
+  }, []);
 
   useEffect(() => {
     const el = wrapRef.current;

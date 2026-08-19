@@ -92,6 +92,8 @@ export function YoutubePlayer({ videoId }: { videoId: string }) {
               iframe?.setAttribute("tabindex", "-1");
               const d = player?.getDuration?.() ?? 0;
               if (d > 0) setDuration(d);
+              const pending = useStudio.getState().seekRequest;
+              if (pending) player?.seekTo(pending.time, true);
             } catch {
               /* ignore */
             }
@@ -108,6 +110,17 @@ export function YoutubePlayer({ videoId }: { videoId: string }) {
         if (!p) return;
         try {
           const t = p.getCurrentTime();
+          const pending = useStudio.getState().seekRequest;
+          // IFrame starts at 0; ignore that until a pending seek has landed.
+          if (
+            pending &&
+            Number.isFinite(t) &&
+            t < 1.25 &&
+            pending.time > 2 &&
+            Math.abs(t - pending.time) > 1.5
+          ) {
+            return;
+          }
           if (Number.isFinite(t)) setVideoTime(t);
           const d = p.getDuration();
           if (d > 0) setDuration(d);

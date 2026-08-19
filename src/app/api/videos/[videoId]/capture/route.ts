@@ -1,8 +1,9 @@
-import { getCachedReconstruction } from "@/lib/db";
-import { getSeed } from "@/lib/seeds";
-import { isCleanCode } from "@/lib/pipeline/code-from-ocr";
+import { isCleanSnapshot, isUsableSnapshot, snapshotSource } from "@/lib/pipeline/code-from-ocr";
+import { previousSameFile, recoverCutoff, significantLines } from "@/lib/pipeline/code-story";
 import { insertSnapshot } from "@/lib/pipeline/ingest";
+import { reconstructionForVideo } from "@/lib/pipeline/run";
 import { captureScreenAt, captureToolchain, nearbyOcrSnapshot } from "@/lib/pipeline/screen-capture";
+import { snapshotAt } from "@/lib/snapshots";
 
 export const maxDuration = 180;
 
@@ -11,57 +12,77 @@ export async function POST(
   ctx: { params: Promise<{ videoId: string }> },
 ) {
   const { videoId } = await ctx.params;
-  const body = (await request.json().catch(() => ({}))) as { time?: number };
+  const body = (await request.json().catch(() => ({}))) as {
+    time?: number;
+    live?: boolean;
+    force?: boolean;
+  };
   const time = Number.isFinite(body.time) ? Math.max(0, Number(body.time)) : 0;
+  const live = Boolean(body.live);
+  const force = Boolean(body.force);
 
-  const rec = getCachedReconstruction(videoId) ?? getSeed(videoId);
+  const rec = reconstructionForVideo(videoId);
   if (!rec) {
     return Response.json({ error: "Unknown video. Open it once first." }, { status: 404 });
   }
 
-  const close = nearbyOcrSnapshot(rec.snapshots, time, 70);
-  if (close && isCleanSnapshot(close)) {
-    return Response.json({ reconstruction: rec, snapshot: close, cached: true });
+  const fallback = () =>
+    nearbyOcrSnapshot(rec.snapshots, time, live ? 4 : 8) ?? snapshotAt(rec.snapshots, time);
+
+  if (!force) {
+    const close = nearbyOcrSnapshot(rec.snapshots, time, live ? 4 : 12);
+    if (close) {
+      return Response.json({ reconstruction: rec, snapshot: close, cached: true });
+    }
   }
 
   const tools = captureToolchain();
   if (!tools.ffmpeg || !tools.tesseract) {
     return Response.json({
       reconstruction: rec,
-      snapshot: null,
+      snapshot: fallback(),
       skipped: true,
-      error: "Install ffmpeg and tesseract to read the screen. Featured seeds stay estimates until then.",
+      note: "Showing the nearest known code.",
     });
   }
 
   try {
-    const snapshot = await captureScreenAt({
+    let snapshot = await captureScreenAt({
       videoId,
       time,
       language: rec.language,
       cues: rec.transcript,
     });
-    const next = insertSnapshot(videoId, snapshot) ?? { ...rec, snapshots: [...rec.snapshots, snapshot] };
-    return Response.json({ reconstruction: next, snapshot, cached: false });
-  } catch (err) {
-    const fallback = nearbyOcrSnapshot(rec.snapshots, time, 90);
-    if (fallback && isCleanSnapshot(fallback)) {
-      return Response.json({
-        reconstruction: rec,
-        snapshot: fallback,
-        cached: true,
-        note: "This frame was too noisy; using the nearest clean extract.",
-      });
+    if (!isUsableSnapshot(snapshot)) {
+      throw new Error("FRAME_NOT_CODE");
     }
+    const prior = previousSameFile(rec.snapshots, time, snapshot.activeFile);
+    const priorText = prior
+      ? (prior.files[snapshot.activeFile] ?? snapshotSource(prior))
+      : undefined;
+    if (priorText) {
+      const recovered = recoverCutoff(snapshotSource(snapshot), priorText);
+      snapshot = {
+        ...snapshot,
+        files: { ...snapshot.files, [snapshot.activeFile]: recovered.code },
+        label: recovered.recovered ? `${snapshot.label} · filled from earlier frame` : snapshot.label,
+      };
+    }
+    const recoveredText = snapshotSource(snapshot);
+    const priorSig = priorText ? significantLines(priorText).length : 0;
+    const nextSig = significantLines(recoveredText).length;
+    const worse = priorSig > 0 && nextSig < priorSig * 0.85;
+    const persist = isCleanSnapshot(snapshot) && !worse;
+    const next = persist
+      ? (insertSnapshot(videoId, snapshot) ?? { ...rec, snapshots: [...rec.snapshots, snapshot] })
+      : rec;
+    return Response.json({ reconstruction: next, snapshot, cached: false });
+  } catch {
     return Response.json({
       reconstruction: rec,
-      snapshot: fallback,
-      error: err instanceof Error ? err.message : String(err),
-    }, { status: 200 });
+      snapshot: fallback(),
+      cached: true,
+      note: "Couldn't read this frame; using the nearest known code.",
+    });
   }
-}
-
-function isCleanSnapshot(snap: { files: Record<string, string>; activeFile: string }): boolean {
-  const text = snap.files[snap.activeFile] ?? Object.values(snap.files)[0] ?? "";
-  return isCleanCode(text);
 }

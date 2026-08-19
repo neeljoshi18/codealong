@@ -4,6 +4,8 @@ import { fetchTranscript } from "@/lib/transcript";
 import { fetchInnertubePlayer, fetchOEmbed, parseDurationSeconds, thumbnailUrl } from "@/lib/youtube";
 import { getSeed } from "@/lib/seeds";
 import { hasXaiKey } from "@/lib/ai/client";
+import { isCleanSnapshot } from "@/lib/pipeline/code-from-ocr";
+import { classifyTutorial } from "@/lib/pipeline/code-story";
 import { reconstructWindow, snapshotsFromChunk } from "@/lib/pipeline/reconstruct-from-transcript";
 import { mergeSnapshotStreams } from "@/lib/pipeline/consolidate";
 import type { CodeSnapshot, VideoReconstruction } from "@/lib/types";
@@ -20,25 +22,33 @@ export function startProcessing(videoId: string): Promise<VideoReconstruction> {
   return ensureHorizon(videoId, 0);
 }
 
+export function reconstructionForVideo(videoId: string): VideoReconstruction | null {
+  const seed = getSeed(videoId);
+  const cached = getCachedReconstruction(videoId);
+  if (seed) return composeSeed(seed, cached);
+  if (!cached) return null;
+  return stripDirtySnapshots(cached);
+}
+
 export async function loadOrStart(videoId: string): Promise<VideoReconstruction> {
   const seed = getSeed(videoId);
   const cached = getCachedReconstruction(videoId);
 
-  if (cached && (cached.source === "ocr" || cached.snapshots.some((s) => s.origin === "ocr" || s.origin === "cleaned"))) {
-    return cached;
-  }
-
   if (seed) {
-    const merged = await hydrateSeed(videoId, seed, cached);
+    const merged = hydrateSeed(videoId, seed, cached);
     void refreshTranscript(merged);
     return merged;
   }
 
   if (cached) {
-    if ((cached.snapshots?.length ?? 0) === 0 && cached.status !== "error") {
+    const cleaned = stripDirtySnapshots(cached);
+    if (cleaned.snapshots.length !== cached.snapshots.length) {
+      saveReconstruction(cleaned);
+    }
+    if ((cleaned.snapshots?.length ?? 0) === 0 && cleaned.status !== "error") {
       void ensureHorizon(videoId, 0);
     }
-    return cached;
+    return cleaned;
   }
 
   const stub = emptyReconstruction(videoId);
@@ -94,11 +104,10 @@ function isSyntheticTranscript(
   return matching / rec.transcript.length > 0.7;
 }
 
-async function hydrateSeed(
-  videoId: string,
+function composeSeed(
   seed: VideoReconstruction,
   cached: VideoReconstruction | null,
-): Promise<VideoReconstruction> {
+): VideoReconstruction {
   const cachedTranscript = cached?.transcript ?? [];
   const preferCached =
     cachedTranscript.length > 8 &&
@@ -106,12 +115,36 @@ async function hydrateSeed(
       snapshots: seed.snapshots,
       transcript: cachedTranscript,
     });
-  const rec: VideoReconstruction = {
+  const extras = (cached?.snapshots ?? []).filter((s) => {
+    if (s.origin !== "ocr" && s.origin !== "cleaned") return false;
+    if (!isCleanSnapshot(s)) return false;
+    const body = s.files[s.activeFile] ?? "";
+    const first = body.split("\n").find((l) => l.trim()) ?? "";
+    if (/^\s*include\s*</.test(first)) return false;
+    return !seed.snapshots.some((ss) => Math.abs(ss.timestamp - s.timestamp) < 8);
+  });
+  const snapshots = mergeSnapshotStreams(seed.snapshots, extras);
+  return {
     ...seed,
     transcript: preferCached ? cachedTranscript : seed.transcript,
+    snapshots,
+    tutorialKind: seed.tutorialKind ?? classifyTutorial(snapshots).kind,
     processedRanges: [{ start: 0, end: seed.duration }],
     horizonEnd: seed.duration,
   };
+}
+
+function stripDirtySnapshots(rec: VideoReconstruction): VideoReconstruction {
+  const snapshots = rec.snapshots.filter((s) => isCleanSnapshot(s));
+  return snapshots.length === rec.snapshots.length ? rec : { ...rec, snapshots };
+}
+
+function hydrateSeed(
+  videoId: string,
+  seed: VideoReconstruction,
+  cached: VideoReconstruction | null,
+): VideoReconstruction {
+  const rec = composeSeed(seed, cached);
   saveReconstruction(rec);
   upsertJob(videoId, {
     status: "ready",
@@ -213,11 +246,14 @@ async function extendHorizon(videoId: string, aroundTime: number): Promise<Video
   }
 
   if (!hasXaiKey() && rec.snapshots.length === 0) {
-    rec.status = "reconstructing";
-    rec.message = "Set XAI_API_KEY to reconstruct uncached videos. Featured demos work without a key.";
-    rec.horizonEnd = targetEnd;
+    rec.status = "ready";
+    rec.progress = 100;
+    rec.source = rec.source === "partial" ? "partial" : rec.source;
+    rec.message = "Watch the video. Open the editor to read this frame — no API key.";
+    rec.horizonEnd = duration;
+    rec.processedRanges = [{ start: 0, end: duration }];
     saveReconstruction(rec);
-    upsertJob(videoId, { status: rec.status, progress: rec.progress, message: rec.message });
+    upsertJob(videoId, { status: "ready", progress: 100, message: rec.message });
     return rec;
   }
 

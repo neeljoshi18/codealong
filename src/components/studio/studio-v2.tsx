@@ -2,29 +2,52 @@
 
 /**
  * UI 2 — watch is YouTube. Open the workbench with the button or E.
- * Video keeps playing. Esc returns. E is ignored while typing in the editor.
+ * Video stays larger than the editor. Esc / red traffic light returns.
+ * E is ignored while typing in the editor.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
-import { Pause, Play, X } from "lucide-react";
+import { Moon, Pause, Play, Sun } from "lucide-react";
 import { AiDrawer } from "@/components/studio/ai-drawer";
 import { CodePane } from "@/components/studio/code-pane";
 import { SelectionToolbar } from "@/components/studio/selection-toolbar";
 import { YoutubePlayer } from "@/components/studio/youtube-player";
 import { Button } from "@/components/ui/button";
+import { useAppearance } from "@/lib/hooks/use-appearance";
 import { useHorizon } from "@/lib/hooks/use-horizon";
 import { useIframeKeyRescue } from "@/lib/hooks/use-iframe-keys";
+import { useLiveScreen } from "@/lib/hooks/use-live-screen";
+import { useMediaCache } from "@/lib/hooks/use-media-cache";
 import { useReconstruction } from "@/lib/hooks/use-reconstruction";
+import { readScreen } from "@/lib/read-screen";
+import { nearestSnapshot } from "@/lib/snapshots";
 import { useStudio } from "@/lib/store";
-import type { CodeSnapshot, VideoReconstruction } from "@/lib/types";
-import { cn } from "@/lib/utils";
-import { formatTime } from "@/lib/utils";
+import { clamp, cn, formatTime } from "@/lib/utils";
+
+const VIDEO_SHARE_DEFAULT = 0.58;
+const VIDEO_SHARE_MIN = 0.52;
+const VIDEO_SHARE_MAX = 0.78;
+
+function parseClock(raw: string): number | null {
+  const trimmed = raw.trim().toLowerCase().replace(/s$/, "");
+  if (!trimmed) return null;
+  if (trimmed.includes(":")) {
+    const parts = trimmed.split(":").map(Number);
+    if (parts.some((n) => !Number.isFinite(n))) return null;
+    return parts.reduce((acc, n) => acc * 60 + n, 0);
+  }
+  const n = Number(trimmed);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
 
 export function StudioV2({ videoId }: { videoId: string }) {
   useReconstruction(videoId);
   useHorizon(videoId);
   useIframeKeyRescue();
+  useLiveScreen(videoId);
+  const cache = useMediaCache(videoId);
+  const { appearance, setAppearance } = useAppearance();
 
   const mode = useStudio((s) => s.mode);
   const rec = useStudio((s) => s.reconstruction);
@@ -32,47 +55,53 @@ export function StudioV2({ videoId }: { videoId: string }) {
   const videoTime = useStudio((s) => s.videoTime);
   const requestPlayback = useStudio((s) => s.requestPlayback);
   const openWorkbench = useStudio((s) => s.openWorkbench);
+  const applyLiveSnapshot = useStudio((s) => s.applyLiveSnapshot);
   const patchReconstruction = useStudio((s) => s.patchReconstruction);
   const exitExperiment = useStudio((s) => s.exitExperiment);
+  const resumeFollow = useStudio((s) => s.resumeFollow);
   const sourceTime = useStudio((s) => s.experimentSourceTime);
+  const dirty = useStudio((s) => s.experimentDirty);
+  const follow = useStudio((s) => s.followVideo);
+  const liveReading = useStudio((s) => s.liveReading);
+  const liveNote = useStudio((s) => s.liveNote);
+  const setLiveStatus = useStudio((s) => s.setLiveStatus);
   const bench = mode === "experiment";
-  const ready = (rec?.snapshots.length ?? 0) > 0;
-  const [busy, setBusy] = useState(false);
+  const ready = rec !== null;
   const [note, setNote] = useState("");
+  const [videoShare, setVideoShare] = useState(VIDEO_SHARE_DEFAULT);
+  const dragRef = useRef<{ startX: number; startShare: number } | null>(null);
+
+  useEffect(() => {
+    const raw = new URLSearchParams(window.location.search).get("t");
+    if (!raw) return;
+    const seconds = parseClock(raw);
+    if (seconds == null) return;
+    useStudio.getState().requestSeek(seconds);
+  }, []);
 
   const openAtScreen = useCallback(async () => {
-    const t = useStudio.getState().videoTime;
-    setBusy(true);
+    const state = useStudio.getState();
+    const t = state.videoTime;
+    const instant = nearestSnapshot(state.reconstruction?.snapshots ?? [], t);
+    openWorkbench(instant);
     setNote("Reading the screen…");
+    setLiveStatus(true, `Reading screen at ${formatTime(t)}…`);
     try {
-      const res = await fetch(`/api/videos/${videoId}/capture`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ time: t }),
-      });
-      const data = (await res.json()) as {
-        reconstruction?: VideoReconstruction;
-        snapshot?: CodeSnapshot | null;
-        error?: string;
-        cached?: boolean;
-      };
+      const data = await readScreen(videoId, t, { force: true });
       if (data.reconstruction) patchReconstruction(data.reconstruction);
-      if (data.error && !data.snapshot) {
-        setNote(data.error);
-        openWorkbench();
-      } else if (data.snapshot) {
-        setNote(data.cached ? "Using previous screen extract" : "Extracted from this frame");
-        openWorkbench(data.snapshot);
+      if (data.snapshot && !useStudio.getState().experimentDirty) {
+        applyLiveSnapshot(data.snapshot);
+        setNote(data.cached ? "Using nearest known code" : "Extracted from this frame");
+        setLiveStatus(false, `Updated ${formatTime(data.snapshot.timestamp)} · next read in 5s`);
       } else {
-        openWorkbench();
+        setNote(data.note || "Showing the nearest known code");
+        setLiveStatus(false, data.note || "Next read in 5s");
       }
     } catch (err) {
-      setNote(err instanceof Error ? err.message : "Capture failed");
-      openWorkbench();
-    } finally {
-      setBusy(false);
+      setNote(err instanceof Error ? err.message : "Showing the nearest known code");
+      setLiveStatus(false, "Read failed · retrying in 5s");
     }
-  }, [videoId, patchReconstruction, openWorkbench, rec]);
+  }, [videoId, patchReconstruction, openWorkbench, applyLiveSnapshot, setLiveStatus]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -108,21 +137,74 @@ export function StudioV2({ videoId }: { videoId: string }) {
     };
   }, [bench, exitExperiment, openAtScreen]);
 
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const dx = e.clientX - drag.startX;
+      const next = clamp(drag.startShare + dx / window.innerWidth, VIDEO_SHARE_MIN, VIDEO_SHARE_MAX);
+      setVideoShare(next);
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, []);
+
+  const startDrag = (e: ReactPointerEvent) => {
+    e.preventDefault();
+    dragRef.current = { startX: e.clientX, startShare: videoShare };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
+
+  const themeToggle = (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={() => setAppearance(appearance === "light" ? "dark" : "light")}
+      aria-label={appearance === "light" ? "Switch to dark mode" : "Switch to bright mode"}
+    >
+      {appearance === "light" ? <Moon className="size-3.5" /> : <Sun className="size-3.5" />}
+      {appearance === "light" ? "Dark" : "Bright"}
+    </Button>
+  );
+
   return (
-    <div className="relative h-dvh w-dvw overflow-hidden bg-black">
+    <div className="relative h-dvh w-dvw overflow-hidden bg-ink text-paper">
       {bench && (
-        <div className="absolute inset-x-0 top-0 z-20 flex h-11 items-center gap-3 border-b border-white/8 bg-[#10131a] px-3 text-paper">
-          <span className="text-sm">Code at {formatTime(sourceTime)}</span>
+        <div className="absolute inset-x-0 top-0 z-20 flex h-11 items-center gap-3 border-b border-line bg-bar px-3">
+          <span className="text-sm">
+            Code at {formatTime(sourceTime)}
+            {follow && !dirty ? " · following video" : ""}
+            {dirty ? " · follow paused (you edited)" : ""}
+          </span>
+          <span className="hidden text-[11px] text-mute lg:inline">
+            {liveReading ? "Reading screen…" : liveNote || "Auto-read every 5s · pause to catch up"}
+          </span>
           <span className="min-w-0 truncate text-[11px] text-mute">{rec?.title}</span>
-          <span className="text-[11px] text-mute">Esc · back to video</span>
+          {rec?.tutorialKind === "episodes" ? (
+            <span className="hidden text-[11px] text-mute sm:inline">lesson tab stitches each example</span>
+          ) : rec?.tutorialKind === "evolving" ? (
+            <span className="hidden text-[11px] text-mute sm:inline">one file, growing with the video</span>
+          ) : null}
           <div className="ml-auto flex items-center gap-1.5">
+            {dirty ? (
+              <Button size="sm" variant="secondary" onClick={resumeFollow}>
+                Resume follow
+              </Button>
+            ) : null}
+            {themeToggle}
             <Button size="sm" variant="secondary" onClick={() => requestPlayback("toggle")}>
               {playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
               {playing ? "Pause" : "Play"}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={exitExperiment}>
-              <X className="size-3.5" />
-              Back
             </Button>
           </div>
         </div>
@@ -131,8 +213,9 @@ export function StudioV2({ videoId }: { videoId: string }) {
       <div
         className={cn(
           "absolute overflow-hidden bg-black",
-          bench ? "bottom-0 left-0 top-11 w-[34%]" : "inset-0 bottom-14 flex items-center justify-center",
+          bench ? "bottom-0 left-0 top-11" : "inset-0 bottom-14 flex items-center justify-center",
         )}
+        style={bench ? { width: `${videoShare * 100}%` } : undefined}
       >
         <div
           className={cn("relative", bench ? "h-full w-full" : "")}
@@ -150,31 +233,60 @@ export function StudioV2({ videoId }: { videoId: string }) {
       </div>
 
       {bench && (
-        <div className="absolute bottom-0 left-[34%] right-0 top-11 min-w-0">
-          <CodePane />
-        </div>
+        <>
+          <button
+            type="button"
+            aria-label="Resize video and editor"
+            onPointerDown={startDrag}
+            className="absolute top-11 z-30 w-1.5 cursor-col-resize bg-line hover:bg-sky"
+            style={{ left: `calc(${videoShare * 100}% - 3px)`, bottom: 0 }}
+          />
+          <div
+            className="absolute bottom-0 right-0 top-11 min-w-0"
+            style={{ left: `${videoShare * 100}%` }}
+          >
+            <CodePane
+              onClose={exitExperiment}
+              onMinimize={() => setVideoShare(VIDEO_SHARE_MAX)}
+              onMaximize={() =>
+                setVideoShare((s) => (s <= VIDEO_SHARE_MIN + 0.01 ? VIDEO_SHARE_DEFAULT : VIDEO_SHARE_MIN))
+              }
+            />
+          </div>
+        </>
       )}
 
       {!bench && (
-        <div className="absolute inset-x-0 bottom-0 z-30 flex h-14 items-center justify-between gap-3 border-t border-white/10 bg-[#0b0d11] px-4">
-          <Link href="/" className="text-[12px] text-brass hover:underline">
-            Code Along
-          </Link>
-          <button
-            type="button"
-            onClick={() => void openAtScreen()}
-            disabled={!ready || busy}
-            className="rounded-md bg-brass px-4 py-2 text-sm font-medium text-ink hover:bg-brass-hot disabled:opacity-40"
-          >
-            {busy
-              ? "Reading the screen…"
-              : ready
-                ? `Open editor at ${formatTime(videoTime)}`
-                : "Loading code…"}
-          </button>
-          <span className="hidden max-w-[280px] truncate text-[11px] text-mute sm:inline">
-            {note || "E · reads this frame, then opens the editor"}
-          </span>
+        <div className="absolute inset-x-0 bottom-0 z-30 border-t border-line bg-bar">
+          {cache.progress < 100 ? (
+            <div className="h-0.5 w-full bg-white/10">
+              <div
+                className="h-full bg-zinc-200 transition-[width] duration-300"
+                style={{ width: `${Math.max(4, Math.min(100, cache.progress))}%` }}
+              />
+            </div>
+          ) : null}
+          <div className="flex h-14 items-center justify-between gap-3 px-4">
+            <Link href="/" className="text-[12px] text-mute hover:underline">
+              Code Along
+            </Link>
+            <button
+              type="button"
+              onClick={() => void openAtScreen()}
+              disabled={!ready}
+              className="rounded-md bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-40"
+            >
+              {ready ? `Open editor at ${formatTime(videoTime)}` : "Loading…"}
+            </button>
+            <div className="flex items-center gap-2">
+              {themeToggle}
+              <span className="hidden max-w-[280px] truncate text-[11px] text-mute sm:inline">
+                {cache.progress < 100
+                  ? cache.message
+                  : note || "E · reads this frame, then opens the editor"}
+              </span>
+            </div>
+          </div>
         </div>
       )}
 

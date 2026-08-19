@@ -15,6 +15,10 @@ export type JobStatus =
 
 export type StudioMode = "watch" | "experiment";
 
+export type Appearance = "dark" | "light";
+
+export type TutorialKind = "evolving" | "episodes";
+
 export type AiMode = "query" | "understand" | "explain-diff" | "explain-tutorial";
 
 export type ExecutionRuntime = "e2b" | "pyodide" | "worker";
@@ -64,10 +68,11 @@ export interface VideoReconstruction {
   message: string;
   error?: string;
   thumbnailUrl?: string;
-  editorTheme: "chronos-dark" | "chronos-js";
+  editorTheme: "chronos-dark" | "chronos-js" | "chronos-light";
   processedAt?: string;
   processedRanges?: { start: number; end: number }[];
   horizonEnd?: number;
+  tutorialKind?: TutorialKind;
 }
 
 export interface ProcessingJob {

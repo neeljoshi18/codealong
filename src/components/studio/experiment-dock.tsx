@@ -145,8 +145,8 @@ export function ExperimentDock() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col border-t border-white/8 bg-[#0b0d11]">
-      <div className="flex items-center gap-2 border-b border-white/6 px-3 py-1.5">
+    <div className="flex h-full min-h-0 flex-col border-t border-line bg-bar">
+      <div className="flex items-center gap-2 border-b border-line px-3 py-1.5">
         <FlaskConical className="size-3.5 text-sage" />
         <span className="text-[11px] uppercase tracking-[0.14em] text-mute">
           Experiment
@@ -190,8 +190,9 @@ export function ExperimentDock() {
           ) : null}
           {!runResult && (
             <p className="text-mute">
-              Edit freely, then Run. Python uses Pyodide in the browser; JavaScript runs in a
-              worker. Set E2B_API_KEY for a remote sandbox.
+              Edit freely, then Run. JavaScript runs in a worker on this device. Python uses
+              Pyodide here too. C++ is shown, not compiled. Explain stays a placeholder until
+              you add a key later.
             </p>
           )}
         </div>

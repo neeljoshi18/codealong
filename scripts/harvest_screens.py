@@ -14,6 +14,19 @@ FFMPEG = "/usr/local/bin/ffmpeg"
 
 def looks_like_code(text: str) -> bool:
     t = text.lower()
+    if any(
+        marker in t
+        for marker in (
+            "tsh resolv",
+            "tshresolv",
+            "port: ",
+            "spaces:",
+            "utf-8 lf",
+            "indexja",
+            "scanning..",
+        )
+    ):
+        return False
     hits = 0
     for token in (
         "let ",
@@ -65,7 +78,12 @@ def main() -> int:
     print(f"duration {duration:.0f}s step {step}s")
 
     cache = json.loads(cache_path.read_text()) if cache_path.exists() else {"snapshots": []}
-    extracted: list[dict] = [s for s in cache.get("snapshots", []) if s.get("origin") in ("ocr", "cleaned")]
+    extracted: list[dict] = [
+        s
+        for s in cache.get("snapshots", [])
+        if s.get("origin") in ("ocr", "cleaned")
+        and looks_like_code(next(iter((s.get("files") or {}).values()), ""))
+    ]
 
     t = 15.0
     while t < duration:
@@ -102,11 +120,18 @@ def main() -> int:
         t += step
 
     extracted.sort(key=lambda s: s["timestamp"])
-    # drop near-duplicates
+    # Keep existing clean/seeded snapshots. Harvest must not wipe them with chrome.
+    existing = [s for s in cache.get("snapshots", []) if s.get("origin") not in ("ocr", "cleaned")]
+    merged = existing + extracted
+    merged.sort(key=lambda s: s["timestamp"])
     deduped: list[dict] = []
-    for s in extracted:
+    for s in merged:
         if deduped and abs(s["timestamp"] - deduped[-1]["timestamp"]) < 8:
-            if len(s["files"][s["activeFile"]]) > len(deduped[-1]["files"][deduped[-1]["activeFile"]]):
+            prev = deduped[-1]
+            prev_origin = prev.get("origin")
+            if prev_origin not in ("ocr", "cleaned") and s.get("origin") in ("ocr", "cleaned"):
+                continue
+            if len(s["files"][s["activeFile"]]) > len(prev["files"][prev["activeFile"]]):
                 deduped[-1] = s
             continue
         deduped.append(s)

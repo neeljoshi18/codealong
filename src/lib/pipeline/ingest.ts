@@ -1,10 +1,12 @@
 import { getCachedReconstruction, saveReconstruction } from "@/lib/db";
+import { isCleanSnapshot } from "@/lib/pipeline/code-from-ocr";
 import { mergeSnapshotStreams } from "@/lib/pipeline/consolidate";
 import type { CodeSnapshot, VideoReconstruction } from "@/lib/types";
 
 export function insertSnapshot(videoId: string, snap: CodeSnapshot): VideoReconstruction | null {
   const rec = getCachedReconstruction(videoId);
   if (!rec) return null;
+  if (!isCleanSnapshot(snap)) return rec;
   const withoutNear = rec.snapshots.filter(
     (s) => !(s.origin && s.origin !== "seed" && Math.abs(s.timestamp - snap.timestamp) < 1.5),
   );

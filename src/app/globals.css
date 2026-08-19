@@ -3,14 +3,34 @@
 :root {
   --background: #0c0d10;
   --foreground: #e8eaed;
+  --ink: #0c0d10;
+  --paper: #e8eaed;
+  --mute: #8b909b;
+  --pane: #0e1116;
+  --bar: #10131a;
+  --line: rgba(255, 255, 255, 0.08);
+}
+
+html[data-theme="light"] {
+  --background: #f3f4f6;
+  --foreground: #1a1d23;
+  --ink: #f3f4f6;
+  --paper: #1a1d23;
+  --mute: #5c6370;
+  --pane: #ffffff;
+  --bar: #eceff3;
+  --line: rgba(15, 20, 25, 0.1);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-ink: #0c0d10;
-  --color-paper: #e8eaed;
-  --color-mute: #8b909b;
+  --color-ink: var(--ink);
+  --color-paper: var(--paper);
+  --color-mute: var(--mute);
+  --color-pane: var(--pane);
+  --color-bar: var(--bar);
+  --color-line: var(--line);
   --color-brass: #d4a054;
   --color-brass-hot: #e2b56a;
   --color-sky: #7eb8c9;
@@ -38,4 +58,12 @@ body {
 
 ::selection {
   background: rgba(212, 160, 84, 0.35);
+}
+
+.monaco-editor .ca-typed-line {
+  background: rgba(126, 184, 201, 0.14);
+}
+
+html[data-theme="light"] .monaco-editor .ca-typed-line {
+  background: rgba(29, 78, 216, 0.08);
 }

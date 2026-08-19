@@ -2,9 +2,10 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAppearance } from "@/lib/hooks/use-appearance";
 import { FEATURED_TUTORIALS } from "@/lib/seeds";
 import { extractVideoId, thumbnailUrl } from "@/lib/youtube";
 
@@ -13,6 +14,7 @@ export function LandingPage() {
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const { appearance, setAppearance } = useAppearance();
 
   const go = async (raw: string) => {
     const id = extractVideoId(raw);
@@ -22,15 +24,6 @@ export function LandingPage() {
     }
     setError("");
     setPending(true);
-    try {
-      await fetch("/api/videos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ videoId: id }),
-      });
-    } catch {
-      // navigation still works; pipeline retries on the watch page
-    }
     router.push(`/watch/${id}`);
   };
 
@@ -49,7 +42,17 @@ export function LandingPage() {
           </span>
           <span className="text-lg tracking-tight">Code Along</span>
         </div>
-        <span className="text-xs text-mute">Desktop · pointer-first</span>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setAppearance(appearance === "light" ? "dark" : "light")}
+          >
+            {appearance === "light" ? <Moon className="size-3.5" /> : <Sun className="size-3.5" />}
+            {appearance === "light" ? "Dark" : "Bright"}
+          </Button>
+          <span className="text-xs text-mute">Desktop · pointer-first</span>
+        </div>
       </header>
 
       <main className="relative mx-auto max-w-3xl px-6 pb-24 pt-10">
@@ -61,8 +64,9 @@ export function LandingPage() {
         </h1>
         <p className="mt-5 max-w-xl text-[15px] leading-7 text-mute">
           The video is just YouTube. The bar at the bottom — or the E key — opens the
-          reconstructed file at that moment beside the still-playing video. Edit it,
-          run it, ask about it. Esc goes back. You never retype the lesson.
+          file on screen beside the still-playing video. Edit it. Run JS or Python
+          in this tab. Esc goes back. No API key. Your browser caches a compact
+          copy in this tab and reads frames here; closing the tab frees that space.
         </p>
 
         <form onSubmit={onSubmit} className="mt-10 flex gap-2">
@@ -82,7 +86,7 @@ export function LandingPage() {
 
         <section className="mt-16">
           <h2 className="mb-4 text-[11px] uppercase tracking-[0.18em] text-mute">
-            Instant demos — no API key required
+            Instant demos — no API key. Any other link caches on this device, in this tab.
           </h2>
           <div className="grid gap-4 md:grid-cols-2">
             {FEATURED_TUTORIALS.map((t) => (

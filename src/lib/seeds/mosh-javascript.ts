@@ -70,6 +70,21 @@ console.log(name);
       "Variables",
     ),
     shot(
+      1166,
+      "index.js",
+      `let name = 'Mosh';
+console.log(name);
+
+// Cannot be a reserved keyword
+// Should be meaningful
+// Cannot start with a number (1name)
+// Cannot contain a space or hyphen (-)
+
+let firstName;
+`,
+      "Naming rules",
+    ),
+    shot(
       1224,
       "index.js",
       `let name = 'Mosh';
@@ -161,11 +176,13 @@ greet('Mary');
     tutorialGoalSummary:
       "Mosh's one-hour JavaScript intro: HTML shell, console, variables, naming rules, const, primitives, objects, arrays, functions.",
     inferredProjectStructure: {
-      files: ["index.html", "index.js"],
-      description: "Live extracts from the VS Code window on screen.",
+      files: ["index.html", "index.js", "lesson.js"],
+      description:
+        "Screen extracts plus lesson.js, which stitches each standalone example as the video moves on.",
       entrypoint: "index.js",
       language: "javascript",
     },
+    tutorialKind: "episodes",
     snapshots,
     transcript: [],
     source: "ocr",

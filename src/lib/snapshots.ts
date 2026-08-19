@@ -22,6 +22,20 @@ export function snapshotAt(snapshots: CodeSnapshot[], time: number): CodeSnapsho
   return i >= 0 ? snapshots[i] : null;
 }
 
+export function nearestSnapshot(snapshots: CodeSnapshot[], time: number): CodeSnapshot | null {
+  if (snapshots.length === 0) return null;
+  let best = snapshots[0];
+  let bestD = Math.abs(best.timestamp - time);
+  for (const snap of snapshots) {
+    const d = Math.abs(snap.timestamp - time);
+    if (d < bestD) {
+      best = snap;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
 export interface SnapshotSectionStep {
   dt?: number;
   body: string;
