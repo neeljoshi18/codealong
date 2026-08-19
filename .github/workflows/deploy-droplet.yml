@@ -1,0 +1,86 @@
+# Deploy from GitHub's network. Campus Wi-Fi blocks SSH port 22;
+# GitHub Actions can still reach the droplet (same path as status.neel.world).
+#
+# Secrets (same values as AI-Manager):
+#   STAGING_HOST     = 206.189.129.31
+#   STAGING_USER     = neel
+#   STAGING_SSH_KEY  = private ed25519 that logs in as neel
+name: Deploy droplet
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "HANDOFF.md"
+
+concurrency:
+  group: codealong-droplet
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.STAGING_SSH_KEY }}
+
+      - name: Known hosts
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+        run: |
+          HOST="${STAGING_HOST:-206.189.129.31}"
+          mkdir -p ~/.ssh
+          ssh-keyscan -T 15 -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Rsync app
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+        run: |
+          set -euo pipefail
+          HOST="${STAGING_USER:-neel}@${STAGING_HOST:-206.189.129.31}"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$HOST" 'mkdir -p ~/codealong'
+          rsync -az --delete \
+            --exclude '.git/' \
+            --exclude 'node_modules/' \
+            --exclude '.next/' \
+            --exclude 'data/videos/' \
+            --exclude 'data/capture/' \
+            --exclude 'data/cache/' \
+            --exclude '**/.DS_Store' \
+            -e "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+            ./ "${HOST}:~/codealong/"
+
+      - name: Build and start container
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+        run: |
+          set -euo pipefail
+          HOST="${STAGING_USER:-neel}@${STAGING_HOST:-206.189.129.31}"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$HOST" bash -s <<'REMOTE'
+          set -euo pipefail
+          cd "$HOME/codealong"
+          docker compose -f deploy/docker-compose.yml up -d --build
+          docker compose -f deploy/docker-compose.yml ps
+          curl -sf --max-time 15 http://127.0.0.1:3001/ >/dev/null && echo "codealong http 200" || echo "codealong not answering yet"
+          # Best-effort Caddy site if we can write it
+          SNIP="$HOME/codealong/deploy/Caddyfile.snippet"
+          if [ -f /etc/caddy/Caddyfile ] && command -v sudo >/dev/null && sudo -n true 2>/dev/null; then
+            if ! sudo grep -q 'codealong.neel.world' /etc/caddy/Caddyfile; then
+              sudo tee -a /etc/caddy/Caddyfile < "$SNIP"
+              sudo caddy reload --config /etc/caddy/Caddyfile || sudo systemctl reload caddy || true
+              echo "appended Caddy site"
+            else
+              echo "Caddy already has codealong.neel.world"
+            fi
+          else
+            echo "Caddy not auto-updated. Add deploy/Caddyfile.snippet on the droplet, then reload Caddy."
+          fi
+          REMOTE

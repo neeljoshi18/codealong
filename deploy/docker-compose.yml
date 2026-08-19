@@ -1,0 +1,17 @@
+services:
+  codealong:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: codealong
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3001"
+    environment:
+      PORT: "3001"
+      HOSTNAME: "0.0.0.0"
+    volumes:
+      - codealong-data:/app/data
+
+volumes:
+  codealong-data:

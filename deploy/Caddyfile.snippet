@@ -1,0 +1,8 @@
+# Append this site to the droplet Caddyfile (same box as status.neel.world),
+# then: caddy reload   (or restart the Caddy container)
+#
+# DNS: GoDaddy A record  codealong  →  206.189.129.31
+
+codealong.neel.world {
+	reverse_proxy 127.0.0.1:3001
+}
