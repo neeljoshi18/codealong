@@ -105,7 +105,8 @@ function cookiesFile(): string | null {
       lastCookieNote = `${src} too small`;
       return null;
     }
-    const dest = "/tmp/codealong-youtube-cookies.txt";
+    const dest = join(dataRoot(), "youtube-cookies.rw.txt");
+    mkdirSync(dataRoot(), { recursive: true });
     copyFileSync(src, dest);
     lastCookieNote = `ok ${rows} from ${src}`;
     return dest;

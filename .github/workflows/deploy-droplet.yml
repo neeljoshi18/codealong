@@ -55,6 +55,7 @@ jobs:
             echo "no cookie secret — YouTube may require cookies from a datacenter IP"
           fi
           python3 -c "import pathlib; t=pathlib.Path('deploy/youtube-cookies.txt').read_text(); assert '\t' in t or t.strip()=='# empty', 'cookies lost their tabs'"
+          chmod 644 deploy/youtube-cookies.txt
 
       - name: Rsync app
         env:
@@ -90,7 +91,8 @@ jobs:
           docker compose -f deploy/docker-compose.yml ps
           sleep 8
           curl -sf --max-time 20 http://127.0.0.1:3001/ >/dev/null && echo "codealong http 200" || echo "codealong not answering yet"
-          docker exec codealong sh -c 'test -s /secrets/youtube-cookies.txt && cp /secrets/youtube-cookies.txt /tmp/c.txt && python3 -m yt_dlp --cookies /tmp/c.txt --skip-download --print id --no-warnings --extractor-args youtube:player_client=web,android -- nFn2frlTves' \
+          chmod 644 "$HOME/codealong/deploy/youtube-cookies.txt" || true
+          docker exec -u root codealong sh -c 'cp /secrets/youtube-cookies.txt /tmp/c.txt && chmod 644 /tmp/c.txt && python3 -m yt_dlp --cookies /tmp/c.txt --skip-download --print id --no-warnings -f b/best --extractor-args youtube:player_client=web,android -- nFn2frlTves' \
             && echo "yt-dlp cookies ok" || echo "yt-dlp cookies smoke failed"
           CADDY="$HOME/ai-manager/deploy/Caddyfile"
           SNIP="$HOME/codealong/deploy/Caddyfile.snippet"
