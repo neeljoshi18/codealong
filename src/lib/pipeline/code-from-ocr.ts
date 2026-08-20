@@ -106,6 +106,7 @@ export function extractCodeOnly(raw: string): { code: string; score: number } {
   for (const original of lines) {
     if (isGarbageOcrLine(original)) continue;
     let line = original.replace(/^\s*\d{1,3}[:.]?\s+/, "").trimEnd();
+    line = line.replace(/^[\w.-]+\.(py|js|ts|tsx|jsx|cpp|h|java|html)\s+\d{1,3}\s+/i, "");
     const commentAt = line.search(/\/\*|\/\//);
     if (commentAt > 0 && commentAt < 24 && !KEYWORD.test(line.slice(0, commentAt)) && !/=/.test(line.slice(0, commentAt))) {
       line = line.slice(commentAt);
@@ -113,12 +114,12 @@ export function extractCodeOnly(raw: string): { code: string; score: number } {
     const key = line.search(KEYWORD);
     if (
       key > 0 &&
-      key < 24 &&
       !/::\s*$/.test(line.slice(0, key)) &&
       !/^\s*#/.test(line) &&
       !/^\s*[\w$.]+\s*=/.test(line)
     ) {
-      line = line.slice(key);
+      const prefix = line.slice(0, key);
+      if (key < 24 || /\s{2,}/.test(prefix)) line = line.slice(key);
     }
     const trimmed = line.trim();
     if (!trimmed) {

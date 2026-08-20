@@ -7,6 +7,8 @@ elif_statements.py
 grocery_budget_calc.py
 External Libraries
 Scratches and Consoles
+k_progtam.py                2     if budget > bill:
+and Comotes                 3         print(budget)
 milk_quantity = int(input('How many cartons of milk in your cart? '))
 bill = bill + milk * milk_quantity
 if budget > bill:

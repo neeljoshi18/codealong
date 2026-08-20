@@ -84,9 +84,14 @@ export async function captureScreenAt(opts: {
 }
 
 function guessFileName(raw: string, code: string, language: string): string {
-  const names = [
-    ...`${raw}\n${code}`.matchAll(/([A-Za-z][\w.-]{1,48}\.(py|js|ts|tsx|jsx|cpp|h|java|html|css))\b/g),
-  ].map((m) => m[1]);
+  const names: string[] = [];
+  for (const line of `${raw}\n${code}`.split(/\n/)) {
+    const m = line
+      .trim()
+      .replace(/^\d{1,3}\s+/, "")
+      .match(/^([A-Za-z][\w.-]{2,40}\.(py|js|ts|tsx|jsx|cpp|h|java|html|css))$/);
+    if (m) names.push(m[1]);
+  }
   const ext =
     language === "python"
       ? ".py"
