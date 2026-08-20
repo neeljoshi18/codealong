@@ -1,3 +1,4 @@
+import { proxyCaptureIfNeeded } from "@/lib/capture-backend";
 import { isCleanSnapshot, isUsableSnapshot, snapshotSource } from "@/lib/pipeline/code-from-ocr";
 import { previousSameFile, recoverCutoff, significantLines } from "@/lib/pipeline/code-story";
 import { insertSnapshot } from "@/lib/pipeline/ingest";
@@ -13,6 +14,8 @@ export async function POST(
   ctx: { params: Promise<{ videoId: string }> },
 ) {
   const { videoId } = await ctx.params;
+  const proxied = await proxyCaptureIfNeeded(request, `/api/videos/${videoId}/capture`);
+  if (proxied) return proxied;
   const body = (await request.json().catch(() => ({}))) as {
     time?: number;
     live?: boolean;

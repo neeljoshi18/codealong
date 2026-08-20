@@ -1,3 +1,4 @@
+import { proxyCaptureIfNeeded } from "@/lib/capture-backend";
 import { getJob } from "@/lib/db";
 import { canLiveOcr } from "@/lib/pipeline/binaries";
 import { mediaStatus } from "@/lib/pipeline/media";
@@ -10,6 +11,8 @@ export async function GET(
   ctx: { params: Promise<{ videoId: string }> },
 ) {
   const { videoId } = await ctx.params;
+  const proxied = await proxyCaptureIfNeeded(request, `/api/videos/${videoId}/status`);
+  if (proxied) return proxied;
   const rec = reconstructionForVideo(videoId);
   const job = getJob(videoId);
   const url = new URL(request.url);

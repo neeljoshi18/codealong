@@ -1,4 +1,5 @@
 import { after } from "next/server";
+import { proxyCaptureIfNeeded } from "@/lib/capture-backend";
 import { getJob } from "@/lib/db";
 import { canLiveOcr } from "@/lib/pipeline/binaries";
 import { ensureFullVideo, ensureWindow, mediaStatus } from "@/lib/pipeline/media";
@@ -14,6 +15,8 @@ export async function POST(
   ctx: { params: Promise<{ videoId: string }> },
 ) {
   const { videoId } = await ctx.params;
+  const proxied = await proxyCaptureIfNeeded(request, `/api/videos/${videoId}/prepare`);
+  if (proxied) return proxied;
   const body = (await request.json().catch(() => ({}))) as { time?: number; full?: boolean };
   const time = Number.isFinite(body.time) ? Math.max(0, Number(body.time)) : 0;
 

@@ -72,7 +72,7 @@ A **website cannot** `fetch` YouTube mp4 bytes (CORS on `googlevideo.com`). Ifra
 | --- | --- |
 | GitHub | `https://github.com/neeljoshi18/codealong` `main` |
 | Vercel | Project `codealong` `prj_BU7FzoYl4TQftmTGo4jvH1NErvOA`, team `neeljoshi18` / `team_H3JV0aAVhBBfXAgZ7X3BiTiM`. **Live:** https://codealong-six.vercel.app and https://codealong-neeljoshi18.vercel.app Auth off. Auto-deploys on push to `main`. Dashboard: https://vercel.com/neeljoshi18/codealong |
-| Custom domain | **`codealong.neel.world` currently resolves to Vercel** (`server: Vercel`, `x-vercel-id`). That is the **wrong** target for live OCR. Apex `neel.world` is Vercel personal site. NS: GoDaddy `ns09.domaincontrol.com`. |
+| Custom domain | **`codealong.neel.world` is a CNAME to `cname.vercel-dns.com`** (Vercel). Live OCR is proxied from Vercel → `https://status.neel.world/codealong-ocr` (droplet Caddy) until GoDaddy A record `codealong` → `206.189.129.31`. |
 | Droplet | `206.189.129.31` (same as `status.neel.world`). User **`neel`** not `root`. Caddy in AI-Manager compose (`~/ai-manager/deploy/Caddyfile`) has the `codealong.neel.world` snippet → `172.17.0.1:3001`. Container on host `:3001` (campus cannot reach 3001; Caddy 443 would, **if DNS pointed here**). |
 | SSH from campus | **Blocked** (port 22 timeout, 2222 timeout, 443 is Caddy). Same as AI-Manager: **do not SSH from campus**. Deploy via GitHub Actions. Hotspot if a shell is required: `ssh -i ~/.ssh/id_ed25519 neel@206.189.129.31` |
 

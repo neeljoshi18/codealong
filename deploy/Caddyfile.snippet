@@ -2,6 +2,8 @@
 # then: caddy reload   (or restart the Caddy container)
 #
 # DNS: GoDaddy A record  codealong  →  206.189.129.31
+# Until that A record exists, Vercel proxies OCR through
+# https://status.neel.world/codealong-ocr/  (handle inserted by deploy-droplet.yml)
 
 codealong.neel.world {
 	reverse_proxy 172.17.0.1:3001
