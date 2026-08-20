@@ -77,9 +77,9 @@ function setStatus(videoId: string, progress: number, message: string) {
 
 function cookiesFile(): string | null {
   const src = firstExisting([
+    "/secrets/youtube-cookies.txt",
     join(process.cwd(), "deploy/youtube-cookies.txt"),
     join(dataRoot(), "youtube-cookies.txt"),
-    "/app/data/youtube-cookies.txt",
   ]);
   if (!src) return null;
   try {
@@ -87,17 +87,27 @@ function cookiesFile(): string | null {
       .split("\n")
       .filter((l) => l && !l.startsWith("#")).length;
     if (rows < 3) return null;
-    // yt-dlp rewrites the jar; the compose mount is :ro.
-    const dest = join(dataRoot(), "youtube-cookies.rw.txt");
-    mkdirSync(dataRoot(), { recursive: true });
-    if (src !== dest) copyFileSync(src, dest);
+    // yt-dlp rewrites the jar. Never point it at a :ro mount.
+    const dest = "/tmp/codealong-youtube-cookies.txt";
+    copyFileSync(src, dest);
     return dest;
   } catch {
     return null;
   }
 }
 
+function publicDownloadError(raw: string): string {
+  const s = raw.toLowerCase();
+  if (s.includes("cookie") || s.includes("sign in") || s.includes("not a bot")) {
+    return "YouTube blocked this fetch. Retrying…";
+  }
+  if (s.includes("timed out")) return "Download timed out. Retrying…";
+  if (s.includes("403") || s.includes("forbidden")) return "YouTube blocked this fetch. Retrying…";
+  return "Couldn't fetch this moment. Retrying…";
+}
+
 function ytDlpBaseArgs(dest: string): string[] {
+  const cookies = cookiesFile();
   const args = [
     "-m",
     "yt_dlp",
@@ -111,7 +121,9 @@ function ytDlpBaseArgs(dest: string): string[] {
     "--socket-timeout",
     "15",
     "--extractor-args",
-    "youtube:player_client=android,ios,web,tv_embedded,web_safari",
+    cookies
+      ? "youtube:player_client=web,web_safari,android"
+      : "youtube:player_client=android,ios,web,tv_embedded,web_safari",
     "--remote-components",
     "ejs:github",
     "-o",
@@ -119,7 +131,6 @@ function ytDlpBaseArgs(dest: string): string[] {
   ];
   const deno = denoBin();
   if (deno) args.push("--js-runtimes", `deno:${deno}`);
-  const cookies = cookiesFile();
   if (cookies) args.push("--cookies", cookies);
   return args;
 }
@@ -217,9 +228,10 @@ export async function ensureWindow(videoId: string, time: number): Promise<strin
       setStatus(videoId, 90, "This moment is ready");
       return dest;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Download failed";
+      const raw = err instanceof Error ? err.message : "Download failed";
+      const msg = publicDownloadError(raw);
       setStatus(videoId, 0, msg);
-      throw err;
+      throw new Error(msg);
     }
   })().finally(() => {
     windowJobs.delete(key);
