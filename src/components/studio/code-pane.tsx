@@ -23,6 +23,10 @@ export function CodePane({
   const follow = useStudio((s) => s.followVideo);
   const dirty = useStudio((s) => s.experimentDirty);
   const snapshots = rec?.snapshots ?? EMPTY_SNAPSHOTS;
+  const experimentFiles = useStudio((s) => s.experimentFiles);
+  const hasBuffer =
+    snapshots.length > 0 ||
+    Object.values(experimentFiles).some((v) => typeof v === "string" && v.trim().length > 0);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-pane">
@@ -62,7 +66,7 @@ export function CodePane({
             <Panel defaultSize="68%" minSize="40%">
               <div className="flex h-full min-h-0">
                 <div className="min-w-0 flex-1">
-                  {snapshots.length === 0 ? <EmptyEditor /> : <MonacoStage />}
+                  {hasBuffer ? <MonacoStage /> : <EmptyEditor />}
                 </div>
               </div>
             </Panel>
@@ -74,7 +78,7 @@ export function CodePane({
         ) : (
           <div className="flex h-full min-h-0">
             <div className="min-w-0 flex-1">
-              {snapshots.length === 0 ? <EmptyEditor /> : <MonacoStage />}
+              {hasBuffer ? <MonacoStage /> : <EmptyEditor />}
             </div>
           </div>
         )}
@@ -110,8 +114,7 @@ function EmptyEditor() {
         {liveReading ? "Reading this frame…" : "No code for this frame yet"}
       </div>
       <p className="max-w-sm text-[12px] leading-5 text-mute">
-        {liveNote ||
-          "The video is playing. Featured demos already have the file. Other videos are read from this moment’s screen — that needs ffmpeg on this machine or the droplet, not Vercel."}
+        {liveNote || "Reading this frame…"}
       </p>
     </div>
   );

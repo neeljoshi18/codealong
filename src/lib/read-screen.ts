@@ -80,7 +80,7 @@ export async function readScreen(
     if (server) return server;
     return {
       snapshot: null,
-      note: "This host couldn't fetch the video file (YouTube blocks browsers). Featured demos still work.",
+      note: "Couldn't read this frame. Retrying…",
     };
   }
 

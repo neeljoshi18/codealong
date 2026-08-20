@@ -60,16 +60,7 @@ export async function captureScreenAt(opts: {
   }
 
   const language = opts.language && opts.language !== "plaintext" ? opts.language : guessLang(filtered.code);
-  const file =
-    language === "python"
-      ? "app.py"
-      : language === "html"
-        ? "index.html"
-        : language === "cpp" || language === "c++"
-          ? "main.cpp"
-          : language === "java"
-            ? "Main.java"
-            : "index.js";
+  const file = guessFileName(raw, filtered.code, language);
   const cleaned = hasXaiKey()
     ? await cleanOcr({ raw: filtered.code, language, file, time: opts.time, cues: opts.cues ?? [] })
     : filtered.code;
@@ -90,6 +81,29 @@ export async function captureScreenAt(opts: {
     label: "Extracted from screen",
     origin: hasXaiKey() ? "cleaned" : "ocr",
   };
+}
+
+function guessFileName(raw: string, code: string, language: string): string {
+  const names = [
+    ...`${raw}\n${code}`.matchAll(/([A-Za-z][\w.-]{1,48}\.(py|js|ts|tsx|jsx|cpp|h|java|html|css))\b/g),
+  ].map((m) => m[1]);
+  const ext =
+    language === "python"
+      ? ".py"
+      : language === "cpp" || language === "c++"
+        ? ".cpp"
+        : language === "java"
+          ? ".java"
+          : language === "html"
+            ? ".html"
+            : ".js";
+  const match = names.find((n) => n.toLowerCase().endsWith(ext) && !/^__init__/.test(n));
+  if (match) return match;
+  if (language === "python") return "app.py";
+  if (language === "html") return "index.html";
+  if (language === "cpp" || language === "c++") return "main.cpp";
+  if (language === "java") return "Main.java";
+  return "index.js";
 }
 
 function guessLang(text: string): string {

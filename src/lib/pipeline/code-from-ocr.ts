@@ -20,13 +20,18 @@ const CHROME_LINE = [
   /^\s*(utf-?8|lf|crlf)\s*$/i,
   /press any key/i,
   /build succeeded/i,
+  /^\s*(project|commit|todo|run|terminal|python console|event log)\s*$/i,
+  /external libraries/i,
+  /scratches and consoles/i,
+  /pycharm/i,
+  /^\s*[\w.-]+\.(py|js|ts|tsx|jsx|cpp|h|java|html)\s*$/i,
 ];
 
 const IDE_CHROME =
   /tsh\s*resolv|port\s*:\s*\d{2,5}|spaces\s*:\s*\d|utf-?8\s+(lf|crlf)|\bln\s+\d+\s*,\s*col\s*\d+|\bindexja\b|[®©].{0,48}index|scanning\.\.|press any key/i;
 
 const KEYWORD =
-  /\b(let|const|var|function|return|if|else|for|while|class|import|export|def|print|from|async|await|typeof|switch|case|break|console|include|using|public|private|protected|virtual|void|namespace|template|struct|cout|cin)\b/;
+  /\b(let|const|var|function|return|if|else|elif|for|while|class|import|export|def|print|from|async|await|typeof|switch|case|break|console|include|using|public|private|protected|virtual|void|namespace|template|struct|cout|cin)\b/;
 
 const KEYWORD_G = new RegExp(KEYWORD.source, "gi");
 
@@ -71,6 +76,7 @@ export function isGarbageOcrLine(line: string): boolean {
   if (/^[-+]?\d{5,}$/.test(t)) return true;
   if (/^(2s|bs|Po|i\.|33)$/i.test(t)) return true;
   if (/^\s*[\w.]+$/.test(t) && !KEYWORD.test(t)) return true;
+  if (/^\s*[\w.-]+\.(py|js|ts|tsx|jsx|cpp|h|java|html)\s*$/i.test(t)) return true;
   const letters = (t.match(/[A-Za-z]/g) || []).length;
   if (t.length > 3 && letters < 2) return true;
   const weird = (t.match(/[^\w\s"'`.,;:(){}\[\]<>=+\-*/\\|&!?#]/g) || []).length;
@@ -100,8 +106,8 @@ export function extractCodeOnly(raw: string): { code: string; score: number } {
   for (const original of lines) {
     if (isGarbageOcrLine(original)) continue;
     let line = original.replace(/^\s*\d{1,3}[:.]?\s+/, "").trimEnd();
-    const commentAt = line.search(/\/\*|\*\s|\/\//);
-    if (commentAt > 0 && commentAt < 24 && !KEYWORD.test(line.slice(0, commentAt))) {
+    const commentAt = line.search(/\/\*|\/\//);
+    if (commentAt > 0 && commentAt < 24 && !KEYWORD.test(line.slice(0, commentAt)) && !/=/.test(line.slice(0, commentAt))) {
       line = line.slice(commentAt);
     }
     const key = line.search(KEYWORD);
@@ -109,7 +115,8 @@ export function extractCodeOnly(raw: string): { code: string; score: number } {
       key > 0 &&
       key < 24 &&
       !/::\s*$/.test(line.slice(0, key)) &&
-      !/^\s*#/.test(line)
+      !/^\s*#/.test(line) &&
+      !/^\s*[\w$.]+\s*=/.test(line)
     ) {
       line = line.slice(key);
     }
@@ -165,7 +172,7 @@ export function extractCodeOnly(raw: string): { code: string; score: number } {
 }
 
 const STARTS_LIKE_CODE =
-  /^(let|const|var|function|def|class|import|from\s|print|if|for|while|try|with|async|using|namespace|struct|template|void|int|public|private|#include|\/\/|#|<!|<html|<head|<body|<script|<meta)/im;
+  /^(let|const|var|function|def|class|import|from\s|print|if|elif|for|while|try|with|async|using|namespace|struct|template|void|int|public|private|#include|\/\/|#|<!|<html|<head|<body|<script|<meta)/im;
 
 export function isUsableCode(text: string): boolean {
   if (!text || !text.trim()) return false;
