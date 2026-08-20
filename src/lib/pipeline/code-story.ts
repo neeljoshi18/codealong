@@ -28,7 +28,7 @@ export function classifyTutorial(snapshots: CodeSnapshot[]): {
   reason: string;
 } {
   if (snapshots.length < 3) {
-    return { kind: "evolving", reason: "too few snapshots to judge" };
+    return { kind: "episodes", reason: "too few snapshots — treat as separate examples" };
   }
   let evolve = 0;
   let episode = 0;
@@ -324,6 +324,18 @@ export function mergeEvolving(
   if (prev === curr) return { code: ensureNl(prev), recovered: false };
 
   const sim = overlapRatio(prev, curr);
+  const currSig = significantLines(curr).length;
+  const prevIsCpp = /#include\b|std::/.test(prev);
+  const currIsPy =
+    /^\s*(import |from |def )/m.test(curr) && !/#include\b|std::/.test(curr);
+  const prevIsPy =
+    /^\s*(import |from |def |print\()/m.test(prev) && !/#include\b|std::/.test(prev);
+
+  // Python tutorials jump between unrelated files. Do not glue them.
+  if (sim < 0.22 && currSig >= 3 && (!prevIsCpp || currIsPy) && (prevIsPy || currIsPy || !prevIsCpp)) {
+    return { code: ensureNl(curr), recovered: false };
+  }
+
   if (looksLikeFullSource(curr) && curr.length >= prev.length && sim >= 0.28) {
     return { code: ensureNl(curr), recovered: curr !== raw };
   }
@@ -336,6 +348,7 @@ export function mergeEvolving(
   }
 
   if (sim >= 0.3) return { code: ensureNl(prev), recovered: true };
+  if (currSig >= 3) return { code: ensureNl(curr), recovered: false };
   return { code: ensureNl(prev), recovered: true };
 }
 

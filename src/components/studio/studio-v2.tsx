@@ -82,8 +82,12 @@ export function StudioV2({ videoId }: { videoId: string }) {
   const openAtScreen = useCallback(async () => {
     const state = useStudio.getState();
     const t = state.videoTime;
-    const instant = nearestSnapshot(state.reconstruction?.snapshots ?? [], t);
-    openWorkbench(instant);
+    const snaps = state.reconstruction?.snapshots ?? [];
+    const instant = nearestSnapshot(snaps, t);
+    const kind = state.reconstruction?.tutorialKind;
+    const close =
+      instant && (kind === "evolving" || Math.abs(instant.timestamp - t) <= 25) ? instant : null;
+    openWorkbench(close);
     setNote("Reading the screen…");
     setLiveStatus(true, `Reading screen at ${formatTime(t)}…`);
     try {

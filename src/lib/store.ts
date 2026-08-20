@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { nanoid } from "nanoid";
 import { clamp, filesFingerprint } from "@/lib/utils";
-import { filesForMoment, mergeEvolving, preferredActiveFile } from "@/lib/pipeline/code-story";
+import { filesForMoment, mergeEvolving, overlapRatio, preferredActiveFile } from "@/lib/pipeline/code-story";
 import { findSnapshotIndex, snapshotAt } from "@/lib/snapshots";
 import type {
   AiMode,
@@ -214,8 +214,13 @@ export const useStudio = create<StudioState>((set, get) => ({
             set(next);
             return;
           }
-          const files = filesForMoment(rec.snapshots, t, snap, rec.tutorialKind);
-          if (rec.tutorialKind === "evolving") {
+          const kind = rec.tutorialKind ?? "episodes";
+          if (kind !== "evolving" && Math.abs(snap.timestamp - t) > 25) {
+            set(next);
+            return;
+          }
+          const files = filesForMoment(rec.snapshots, t, snap, kind);
+          if (kind === "evolving") {
             const out = { ...state.experimentFiles };
             let changed = false;
             for (const [file, incoming] of Object.entries(files)) {
@@ -413,16 +418,17 @@ export const useStudio = create<StudioState>((set, get) => ({
     const state = get();
     if (state.mode !== "experiment" || state.experimentDirty) return;
     const rec = state.reconstruction;
-    const evolving = rec?.tutorialKind === "evolving";
+    const file = snap.activeFile || state.experimentActiveFile;
+    const incoming = snap.files[file] ?? Object.values(snap.files)[0] ?? "";
+    const prev = state.experimentFiles[file] ?? "";
+    const related = prev && incoming ? overlapRatio(prev, incoming) >= 0.22 : false;
+    const evolving = rec?.tutorialKind === "evolving" && related;
     let files: Record<string, string>;
     if (evolving) {
-      const file = snap.activeFile || state.experimentActiveFile;
-      const incoming = snap.files[file] ?? Object.values(snap.files)[0] ?? "";
-      const prev = state.experimentFiles[file] ?? "";
       const merged = mergeEvolving(prev, incoming);
       files = { ...state.experimentFiles, [file]: merged.code };
     } else {
-      files = rec ? filesForMoment(rec.snapshots, snap.timestamp, snap, rec.tutorialKind) : { ...snap.files };
+      files = { ...snap.files };
     }
     if (filesFingerprint(files) === filesFingerprint(state.experimentFiles)) {
       set({ experimentSourceTime: snap.timestamp, codeTime: snap.timestamp });

@@ -1,6 +1,12 @@
 import { proxyCaptureIfNeeded } from "@/lib/capture-backend";
-import { isCleanSnapshot, isUsableSnapshot, snapshotSource } from "@/lib/pipeline/code-from-ocr";
-import { previousSameFile, recoverCutoff, significantLines } from "@/lib/pipeline/code-story";
+import { isUsableSnapshot, snapshotSource } from "@/lib/pipeline/code-from-ocr";
+import {
+  classifyTutorial,
+  overlapRatio,
+  previousSameFile,
+  recoverCutoff,
+  significantLines,
+} from "@/lib/pipeline/code-story";
 import { insertSnapshot } from "@/lib/pipeline/ingest";
 import { canLiveOcr } from "@/lib/pipeline/binaries";
 import { loadOrStart, reconstructionForVideo } from "@/lib/pipeline/run";
@@ -26,9 +32,17 @@ export async function POST(
   const force = Boolean(body.force);
 
   const rec = reconstructionForVideo(videoId) ?? (await loadOrStart(videoId));
+  const kind = rec.tutorialKind ?? classifyTutorial(rec.snapshots).kind;
 
-  const fallback = () =>
-    nearbyOcrSnapshot(rec.snapshots, time, live ? 4 : 8) ?? snapshotAt(rec.snapshots, time);
+  const fallback = () => {
+    const close = nearbyOcrSnapshot(rec.snapshots, time, live ? 6 : 12);
+    if (close) return close;
+    const at = snapshotAt(rec.snapshots, time);
+    if (!at) return null;
+    if (kind === "evolving") return at;
+    if (Math.abs(at.timestamp - time) <= 25) return at;
+    return null;
+  };
 
   if (!force) {
     const close = nearbyOcrSnapshot(rec.snapshots, time, live ? 4 : 12);
@@ -66,18 +80,22 @@ export async function POST(
       ? (prior.files[snapshot.activeFile] ?? snapshotSource(prior))
       : undefined;
     if (priorText) {
-      const recovered = recoverCutoff(snapshotSource(snapshot), priorText);
-      snapshot = {
-        ...snapshot,
-        files: { ...snapshot.files, [snapshot.activeFile]: recovered.code },
-        label: recovered.recovered ? `${snapshot.label} · filled from earlier frame` : snapshot.label,
-      };
+      const sim = overlapRatio(priorText, snapshotSource(snapshot));
+      if (sim >= 0.22) {
+        const recovered = recoverCutoff(snapshotSource(snapshot), priorText);
+        snapshot = {
+          ...snapshot,
+          files: { ...snapshot.files, [snapshot.activeFile]: recovered.code },
+          label: recovered.recovered ? `${snapshot.label} · filled from earlier frame` : snapshot.label,
+        };
+      }
     }
     const recoveredText = snapshotSource(snapshot);
     const priorSig = priorText ? significantLines(priorText).length : 0;
     const nextSig = significantLines(recoveredText).length;
-    const worse = priorSig > 0 && nextSig < priorSig * 0.85;
-    const persist = isCleanSnapshot(snapshot) && !worse;
+    const related = priorText ? overlapRatio(priorText, recoveredText) >= 0.22 : false;
+    const worse = related && priorSig > 0 && nextSig < priorSig * 0.85;
+    const persist = isUsableSnapshot(snapshot) && !worse;
     const next = persist
       ? (insertSnapshot(videoId, snapshot) ?? { ...rec, snapshots: [...rec.snapshots, snapshot] })
       : rec;
