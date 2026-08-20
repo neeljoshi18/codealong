@@ -67,7 +67,9 @@ export async function captureScreenAt(opts: {
         ? "index.html"
         : language === "cpp" || language === "c++"
           ? "main.cpp"
-          : "index.js";
+          : language === "java"
+            ? "Main.java"
+            : "index.js";
   const cleaned = hasXaiKey()
     ? await cleanOcr({ raw: filtered.code, language, file, time: opts.time, cues: opts.cues ?? [] })
     : filtered.code;
@@ -93,6 +95,7 @@ export async function captureScreenAt(opts: {
 function guessLang(text: string): string {
   if (/^\s*</m.test(text) && /<\/?[a-z]+/i.test(text)) return "html";
   if (/#include\b|std::|int\s+main\s*\(/.test(text)) return "cpp";
+  if (/\bpublic\s+class\b|System\.out\.println/.test(text)) return "java";
   if (/\bdef\s+\w+\s*\(|\bimport\s+\w+|print\(/.test(text)) return "python";
   return "javascript";
 }

@@ -8,6 +8,7 @@ import { ocrFrameBlob } from "@/lib/client-engine/ocr";
 function guessLang(text: string): string {
   if (/^\s*</m.test(text) && /<\/?[a-z]+/i.test(text)) return "html";
   if (/#include\b|std::|int\s+main\s*\(/.test(text)) return "cpp";
+  if (/\bpublic\s+class\b|System\.out\.println/.test(text)) return "java";
   if (/\bdef\s+\w+\s*\(|\bimport\s+\w+|print\(/.test(text)) return "python";
   return "javascript";
 }
@@ -16,6 +17,7 @@ function fileFor(language: string): string {
   if (language === "python") return "app.py";
   if (language === "html") return "index.html";
   if (language === "cpp" || language === "c++") return "main.cpp";
+  if (language === "java") return "Main.java";
   return "index.js";
 }
 
