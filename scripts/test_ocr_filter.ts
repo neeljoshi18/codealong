@@ -60,8 +60,7 @@ if (sameExample(grocery, secret)) {
   throw new Error("grocery and secret_number counted as the same example");
 }
 
-const dill = repairOcrTypos(`bill = bill + milk * milk_quantity
-if budget > DILL:
+const dill = repairOcrTypos(`if budget > DILL:
     print (budget)
 else:
     print('Not enough funds')
@@ -71,6 +70,9 @@ if (dill.includes("DILL") || dill.includes("print (")) {
 }
 if (!dill.includes("if budget > bill:")) {
   throw new Error("DILL did not become bill:\n" + dill);
+}
+if (repairOcrTypos("if quess is too big").includes("quess")) {
+  throw new Error("quess not repaired to guess");
 }
 
 const raadoa = repairOcrTypos(`import raadoa\nsecret_number = random.randint(1, 100)\n`);

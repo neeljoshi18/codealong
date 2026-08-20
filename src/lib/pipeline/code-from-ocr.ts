@@ -304,6 +304,10 @@ function nearestTrusted(tok: string, trusted: string[], maxDist: number): string
 export function repairOcrTypos(code: string): string {
   if (!code.trim()) return code;
   let text = code.replace(/\b(print|input|len|range|int|str|float)\s+\(/g, "$1(");
+  text = text.replace(/\bquess\b/gi, "guess");
+  if (/\bbudget\b/.test(text)) {
+    text = text.replace(/\b(DILL|PILL|BIIL|8ILL|B1LL)\b/g, "bill");
+  }
   text = text.replace(/^\s*(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)/gm, (full, name: string) => {
     if (PY_MODULES.includes(name)) return full;
     let best: string | null = null;
