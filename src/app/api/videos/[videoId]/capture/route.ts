@@ -88,7 +88,9 @@ export async function POST(
     const emptyNote =
       reason === "FRAME_NOT_CODE"
         ? "This frame doesn't look like a code editor. Pause when the file is on screen."
-        : "Couldn't fetch this moment yet. Retry in a few seconds.";
+        : reason && reason !== "FRAME_NOT_CODE"
+          ? reason
+          : "Couldn't fetch this moment yet. Retry in a few seconds.";
     return Response.json({
       reconstruction: rec,
       snapshot: snap,

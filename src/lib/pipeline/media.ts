@@ -89,7 +89,7 @@ function ytDlpBaseArgs(dest: string): string[] {
     "--socket-timeout",
     "15",
     "--extractor-args",
-    "youtube:player_client=android,ios,web",
+    "youtube:player_client=android,ios,web,tv_embedded,web_safari",
     "--remote-components",
     "ejs:github",
     "-o",
@@ -115,8 +115,10 @@ function runYtDlp(
   args.push(...extra);
   return new Promise((resolve, reject) => {
     const child = spawn(pythonBin(), args, { stdio: ["ignore", "pipe", "pipe"] });
+    let tail = "";
     const onData = (buf: Buffer) => {
       const text = buf.toString("utf8");
+      tail = (tail + text).slice(-800);
       const m = text.match(/\[download\]\s+(\d{1,3}(?:\.\d+)?)%/);
       if (m && onProgress) onProgress(Number(m[1]));
     };
@@ -133,7 +135,10 @@ function runYtDlp(
     child.on("close", (code) => {
       clearTimeout(timer);
       if (code === 0) resolve();
-      else reject(new Error(`yt-dlp exited ${code}`));
+      else {
+        const hint = tail.replace(/\s+/g, " ").trim().slice(-240);
+        reject(new Error(hint ? `yt-dlp exited ${code}: ${hint}` : `yt-dlp exited ${code}`));
+      }
     });
   });
 }
@@ -176,16 +181,22 @@ export async function ensureWindow(videoId: string, time: number): Promise<strin
   const job = (async () => {
     const end = start + MEDIA_WINDOW_SEC + 2;
     setStatus(videoId, 8, `Fetching ${fmt(start)}–${fmt(end)}…`);
-    await downloadTo(
-      dest,
-      ["--download-sections", `*${start}-${end}`, "--", videoId],
-      videoId,
-      8,
-      88,
-      50_000,
-    );
-    setStatus(videoId, 90, "This moment is ready");
-    return dest;
+    try {
+      await downloadTo(
+        dest,
+        ["--download-sections", `*${start}-${end}`, "--", videoId],
+        videoId,
+        8,
+        88,
+        50_000,
+      );
+      setStatus(videoId, 90, "This moment is ready");
+      return dest;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Download failed";
+      setStatus(videoId, 0, msg);
+      throw err;
+    }
   })().finally(() => {
     windowJobs.delete(key);
   });
