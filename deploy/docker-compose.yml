@@ -12,6 +12,7 @@ services:
       HOSTNAME: "0.0.0.0"
     volumes:
       - codealong-data:/app/data
+      - ./youtube-cookies.txt:/app/data/youtube-cookies.txt:ro
 
 volumes:
   codealong-data:

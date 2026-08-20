@@ -38,6 +38,19 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -T 15 -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
 
+      - name: YouTube cookies
+        env:
+          YTDLP_COOKIES: ${{ secrets.YTDLP_COOKIES }}
+        run: |
+          mkdir -p deploy
+          if [ -n "$YTDLP_COOKIES" ]; then
+            printf '%s\n' "$YTDLP_COOKIES" > deploy/youtube-cookies.txt
+            echo "wrote youtube cookies ($(wc -c < deploy/youtube-cookies.txt | tr -d ' ') bytes)"
+          else
+            printf '# empty\n' > deploy/youtube-cookies.txt
+            echo "no YTDLP_COOKIES secret — YouTube may require cookies from a datacenter IP"
+          fi
+
       - name: Rsync app
         env:
           STAGING_HOST: ${{ secrets.STAGING_HOST }}
@@ -54,6 +67,7 @@ jobs:
             --exclude 'data/capture/' \
             --exclude 'data/cache/' \
             --exclude '**/.DS_Store' \
+            --exclude '/tmp/' \
             -e "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
             ./ "${HOST}:~/codealong/"
 

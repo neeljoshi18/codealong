@@ -42,6 +42,10 @@ yarn-error.log*
 /data/tmp
 /data/capture
 
+# YouTube cookies for droplet yt-dlp (never commit)
+/deploy/youtube-cookies.txt
+*youtube-cookies.txt
+
 # vercel
 .vercel
 

@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { upsertJob } from "@/lib/db";
 import { MEDIA_WINDOW_SEC, windowStartFor } from "@/lib/media-window";
-import { dataRoot, isEphemeralHost } from "@/lib/paths";
+import { dataRoot, firstExisting, isEphemeralHost } from "@/lib/paths";
 import { denoBin, pythonBin } from "@/lib/pipeline/binaries";
 import { isSeeded } from "@/lib/seeds";
 
@@ -75,6 +75,23 @@ function setStatus(videoId: string, progress: number, message: string) {
   upsertJob(videoId, { status: progress >= 100 ? "ready" : "fetching", progress, message });
 }
 
+function cookiesFile(): string | null {
+  const p = firstExisting([
+    join(dataRoot(), "youtube-cookies.txt"),
+    join(process.cwd(), "deploy/youtube-cookies.txt"),
+    "/app/data/youtube-cookies.txt",
+  ]);
+  if (!p) return null;
+  try {
+    const rows = readFileSync(p, "utf8")
+      .split("\n")
+      .filter((l) => l && !l.startsWith("#")).length;
+    return rows >= 3 ? p : null;
+  } catch {
+    return null;
+  }
+}
+
 function ytDlpBaseArgs(dest: string): string[] {
   const args = [
     "-m",
@@ -97,6 +114,8 @@ function ytDlpBaseArgs(dest: string): string[] {
   ];
   const deno = denoBin();
   if (deno) args.push("--js-runtimes", `deno:${deno}`);
+  const cookies = cookiesFile();
+  if (cookies) args.push("--cookies", cookies);
   return args;
 }
 
