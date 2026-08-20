@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { upsertJob } from "@/lib/db";
 import { MEDIA_WINDOW_SEC, windowStartFor } from "@/lib/media-window";
@@ -76,17 +76,22 @@ function setStatus(videoId: string, progress: number, message: string) {
 }
 
 function cookiesFile(): string | null {
-  const p = firstExisting([
-    join(dataRoot(), "youtube-cookies.txt"),
+  const src = firstExisting([
     join(process.cwd(), "deploy/youtube-cookies.txt"),
+    join(dataRoot(), "youtube-cookies.txt"),
     "/app/data/youtube-cookies.txt",
   ]);
-  if (!p) return null;
+  if (!src) return null;
   try {
-    const rows = readFileSync(p, "utf8")
+    const rows = readFileSync(src, "utf8")
       .split("\n")
       .filter((l) => l && !l.startsWith("#")).length;
-    return rows >= 3 ? p : null;
+    if (rows < 3) return null;
+    // yt-dlp rewrites the jar; the compose mount is :ro.
+    const dest = join(dataRoot(), "youtube-cookies.rw.txt");
+    mkdirSync(dataRoot(), { recursive: true });
+    if (src !== dest) copyFileSync(src, dest);
+    return dest;
   } catch {
     return null;
   }
