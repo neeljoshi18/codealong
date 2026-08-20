@@ -1,25 +1,24 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, type PointerEvent as ReactPointerEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Moon, Sun } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Mark } from "@/components/brand/logo";
 import { useAppearance } from "@/lib/hooks/use-appearance";
-import { FEATURED_TUTORIALS } from "@/lib/seeds";
-import { extractVideoId, thumbnailUrl } from "@/lib/youtube";
+import { extractVideoId } from "@/lib/youtube";
 
 export function LandingPage() {
   const router = useRouter();
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [spot, setSpot] = useState({ x: 50, y: 28 });
   const { appearance, setAppearance } = useAppearance();
 
-  const go = async (raw: string) => {
+  const go = (raw: string) => {
     const id = extractVideoId(raw);
     if (!id) {
-      setError("Paste a full YouTube URL or an 11-character video ID.");
+      setError("Paste a YouTube URL.");
       return;
     }
     setError("");
@@ -29,93 +28,82 @@ export function LandingPage() {
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    void go(url);
+    go(url);
+  };
+
+  const onMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setSpot({
+      x: ((e.clientX - r.left) / r.width) * 100,
+      y: ((e.clientY - r.top) / r.height) * 100,
+    });
   };
 
   return (
-    <div className="min-h-dvh bg-ink text-paper">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(212,160,84,0.08),_transparent_50%)]" />
-      <header className="relative mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-        <div className="flex items-center gap-2">
-          <span className="grid size-8 place-items-center rounded-md bg-brass/20 font-mono text-sm text-brass">
-            C
-          </span>
-          <span className="text-lg tracking-tight">Code Along</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setAppearance(appearance === "light" ? "dark" : "light")}
-          >
-            {appearance === "light" ? <Moon className="size-3.5" /> : <Sun className="size-3.5" />}
-            {appearance === "light" ? "Dark" : "Bright"}
-          </Button>
-          <span className="text-xs text-mute">Desktop · pointer-first</span>
-        </div>
+    <div
+      className="relative min-h-dvh overflow-hidden bg-ink text-paper"
+      onPointerMove={onMove}
+    >
+      <div
+        className="pointer-events-none absolute inset-0 transition-opacity duration-500"
+        style={{
+          background: `radial-gradient(520px circle at ${spot.x}% ${spot.y}%, color-mix(in srgb, var(--paper) 9%, transparent), transparent 55%)`,
+        }}
+      />
+
+      <header className="relative z-10 mx-auto flex max-w-5xl items-center justify-between px-6 py-6">
+        <Link href="/" className="group inline-flex items-center gap-2.5">
+          <Mark className="h-7 w-11" />
+          <span className="text-[15px] tracking-tight">Code Along</span>
+        </Link>
+        <button
+          type="button"
+          onClick={() => setAppearance(appearance === "light" ? "dark" : "light")}
+          className="text-[13px] text-mute transition-colors hover:text-paper"
+        >
+          {appearance === "light" ? "Dark" : "Light"}
+        </button>
       </header>
 
-      <main className="relative mx-auto max-w-3xl px-6 pb-24 pt-10">
-        <p className="mb-3 text-[11px] uppercase tracking-[0.22em] text-brass">
-          YouTube tutorials, reconstructed
-        </p>
-        <h1 className="max-w-2xl text-4xl font-medium leading-[1.15] tracking-tight md:text-5xl">
-          Watch the tutorial. Open the editor when you want the code.
+      <main className="relative z-10 mx-auto flex min-h-[calc(100dvh-88px)] max-w-3xl flex-col justify-center px-6 pb-24">
+        <div className="ca-rise group mb-10">
+          <Mark className="h-16 w-24 md:h-20 md:w-32" />
+        </div>
+
+        <h1 className="ca-rise-delay max-w-xl text-4xl leading-[1.05] tracking-tight md:text-6xl">
+          Watch.
+          <br />
+          Open the code.
         </h1>
-        <p className="mt-5 max-w-xl text-[15px] leading-7 text-mute">
-          The video is just YouTube. The bar at the bottom — or the E key — opens the
-          file on screen beside the still-playing video. Edit it. Run JS or Python
-          in this tab. Esc goes back. No API key. Featured demos are instant. Other
-          links are read from the frame, which needs ffmpeg on this machine or the
-          droplet — not the Vercel demo host.
-        </p>
 
-        <form onSubmit={onSubmit} className="mt-10 flex gap-2">
-          <Input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://www.youtube.com/watch?v=…"
-            autoFocus
-            className="h-12 text-base"
-          />
-          <Button type="submit" size="lg" disabled={pending}>
-            Open
-            <ArrowRight className="size-4" />
-          </Button>
+        <form onSubmit={onSubmit} className="ca-rise-late mt-12 flex max-w-xl items-end gap-3">
+          <label className="min-w-0 flex-1">
+            <span className="sr-only">YouTube URL</span>
+            <input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="Paste a YouTube link"
+              autoFocus
+              className="h-12 w-full border-0 border-b border-paper/25 bg-transparent pb-2 text-[17px] font-bold tracking-tight text-paper outline-none placeholder:font-bold placeholder:text-mute/80 transition-[border-color] duration-200 focus:border-paper"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={pending}
+            className="group/btn relative h-12 overflow-hidden px-1 text-[17px] tracking-tight disabled:opacity-40"
+          >
+            <span className="relative z-10 inline-flex items-center gap-1">
+              Open
+              <span className="inline-block transition-transform duration-200 group-hover/btn:translate-x-0.5">
+                →
+              </span>
+            </span>
+            <span className="ca-caret ml-0.5 inline-block h-4 w-px bg-paper align-middle" />
+          </button>
         </form>
-        {error && <p className="mt-2 text-sm text-rose">{error}</p>}
+        {error ? <p className="mt-3 text-sm text-mute">{error}</p> : null}
 
-        <section className="mt-16">
-          <h2 className="mb-4 text-[11px] uppercase tracking-[0.18em] text-mute">
-            Instant demos — no API key. Any other link needs a machine that can download the file.
-          </h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            {FEATURED_TUTORIALS.map((t) => (
-              <button
-                key={t.videoId}
-                type="button"
-                onClick={() => void go(t.videoId)}
-                className="group overflow-hidden rounded-xl border border-white/8 bg-white/3 text-left hover:border-brass/40"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={thumbnailUrl(t.videoId)}
-                  alt=""
-                  className="h-36 w-full object-cover opacity-80 transition group-hover:opacity-100"
-                />
-                <div className="p-4">
-                  <div className="flex items-center justify-between text-[11px] text-mute">
-                    <span>{t.language}</span>
-                    <span>{t.durationLabel}</span>
-                  </div>
-                  <div className="mt-1 text-[15px] text-paper">{t.title}</div>
-                  <div className="text-[12px] text-mute">{t.channel}</div>
-                  <p className="mt-2 text-[12px] leading-5 text-mute">{t.blurb}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-        </section>
+        <p className="ca-rise-late mt-16 text-[13px] text-mute">Press E while it plays.</p>
       </main>
     </div>
   );

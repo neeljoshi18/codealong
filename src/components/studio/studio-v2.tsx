@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { Moon, Pause, Play, Sun } from "lucide-react";
+import { Mark } from "@/components/brand/logo";
 import { AiDrawer } from "@/components/studio/ai-drawer";
 import { CodePane } from "@/components/studio/code-pane";
 import { SelectionToolbar } from "@/components/studio/selection-toolbar";
@@ -266,7 +267,8 @@ export function StudioV2({ videoId }: { videoId: string }) {
             </div>
           ) : null}
           <div className="flex h-14 items-center justify-between gap-3 px-4">
-            <Link href="/" className="text-[12px] text-mute hover:underline">
+            <Link href="/" className="group inline-flex items-center gap-2 text-[12px] text-mute hover:text-paper">
+              <Mark className="h-3.5 w-5" />
               Code Along
             </Link>
             <button
