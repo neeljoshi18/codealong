@@ -1,3 +1,5 @@
+import { snapshotSource } from "@/lib/pipeline/code-from-ocr";
+import { sameExample } from "@/lib/pipeline/code-story";
 import { filesFingerprint } from "@/lib/utils";
 import type { CodeSnapshot } from "@/lib/types";
 
@@ -31,14 +33,16 @@ export function mergeSnapshotStreams(
   // Prefer overlay (vision) at nearby timestamps; keep primary for density.
   const merged = [...primary];
   for (const vis of overlay) {
-    const near = merged.findIndex((s) => Math.abs(s.timestamp - vis.timestamp) < 4);
+    const near = merged.findIndex((s) => Math.abs(s.timestamp - vis.timestamp) < 2);
     if (near >= 0) {
+      const existing = merged[near];
+      const related = sameExample(snapshotSource(existing), snapshotSource(vis));
       merged[near] = {
-        ...merged[near],
+        ...existing,
         ...vis,
-        id: merged[near].id,
-        files: { ...merged[near].files, ...vis.files },
-        label: vis.label || merged[near].label,
+        id: existing.id,
+        files: related ? { ...existing.files, ...vis.files } : { ...vis.files },
+        label: vis.label || existing.label,
       };
     } else {
       merged.push(vis);

@@ -119,7 +119,10 @@ export function extractCodeOnly(raw: string): { code: string; score: number } {
       !/^\s*[\w$.]+\s*=/.test(line)
     ) {
       const prefix = line.slice(0, key);
-      if (key < 24 || /\s{2,}/.test(prefix)) line = line.slice(key);
+      // Whitespace is indentation. Only slice file-tree / chrome prefixes.
+      if (!/^\s+$/.test(prefix) && (key < 24 || /\s{2,}/.test(prefix))) {
+        line = line.slice(key);
+      }
     }
     const trimmed = line.trim();
     if (!trimmed) {
@@ -163,13 +166,164 @@ export function extractCodeOnly(raw: string): { code: string; score: number } {
   while (kept[0] === "") kept.shift();
   while (kept[kept.length - 1] === "") kept.pop();
 
-  const code = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  const code = repairOcrTypos(kept.join("\n").replace(/\n{3,}/g, "\n\n").trim());
   KEYWORD_G.lastIndex = 0;
   const hits =
     (code.match(KEYWORD_G) || []).length +
     (code.match(/^\s*\/\//gm) || []).length +
     (code.match(/<\/?[a-zA-Z]/g) || []).length;
   return { code, score: hits };
+}
+
+const OCR_KEYWORDS = new Set(
+  [
+    "let",
+    "const",
+    "var",
+    "function",
+    "return",
+    "if",
+    "else",
+    "elif",
+    "for",
+    "while",
+    "class",
+    "import",
+    "export",
+    "from",
+    "def",
+    "print",
+    "async",
+    "await",
+    "true",
+    "false",
+    "none",
+    "null",
+    "int",
+    "void",
+    "string",
+    "public",
+    "private",
+    "and",
+    "or",
+    "not",
+    "in",
+    "is",
+    "try",
+    "except",
+    "with",
+    "as",
+    "pass",
+    "break",
+    "continue",
+    "input",
+    "len",
+    "range",
+    "self",
+    "this",
+    "include",
+    "using",
+    "namespace",
+  ].map((s) => s.toLowerCase()),
+);
+
+const PY_MODULES = [
+  "random",
+  "math",
+  "sys",
+  "os",
+  "time",
+  "json",
+  "re",
+  "datetime",
+  "collections",
+  "itertools",
+  "functools",
+  "typing",
+  "pathlib",
+  "copy",
+  "string",
+];
+
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > 2) return 9;
+  const m = a.length;
+  const n = b.length;
+  const dp = new Array<number>(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+
+function trustedIdentifiers(code: string): string[] {
+  const counts = new Map<string, number>();
+  const trusted: string[] = [];
+  const seen = new Set<string>();
+  for (const tok of code.match(/\b[A-Za-z_][A-Za-z0-9_]*\b/g) ?? []) {
+    if (OCR_KEYWORDS.has(tok.toLowerCase())) continue;
+    counts.set(tok, (counts.get(tok) ?? 0) + 1);
+  }
+  const add = (tok: string) => {
+    if (!tok || OCR_KEYWORDS.has(tok.toLowerCase()) || seen.has(tok)) return;
+    seen.add(tok);
+    trusted.push(tok);
+  };
+  for (const m of code.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/gm)) add(m[1]);
+  for (const m of code.matchAll(/\b(?:def|class|function)\s+([A-Za-z_][A-Za-z0-9_]*)/g)) add(m[1]);
+  for (const [tok, n] of counts) {
+    if (n >= 2) add(tok);
+  }
+  return trusted;
+}
+
+function nearestTrusted(tok: string, trusted: string[], maxDist: number): string | null {
+  const lower = tok.toLowerCase();
+  let best: string | null = null;
+  let bestD = maxDist + 1;
+  for (const id of trusted) {
+    if (id === tok) return null;
+    const d = editDistance(lower, id.toLowerCase());
+    if (d > 0 && d < bestD && d <= maxDist && Math.abs(id.length - tok.length) <= 1) {
+      best = id;
+      bestD = d;
+    }
+  }
+  return bestD <= maxDist ? best : null;
+}
+
+/** Fix Tesseract near-misses (DILL→bill, raadoa→random) using tokens already in the file. */
+export function repairOcrTypos(code: string): string {
+  if (!code.trim()) return code;
+  let text = code.replace(/\b(print|input|len|range|int|str|float)\s+\(/g, "$1(");
+  text = text.replace(/^\s*(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)/gm, (full, name: string) => {
+    if (PY_MODULES.includes(name)) return full;
+    let best: string | null = null;
+    let bestD = 3;
+    for (const mod of PY_MODULES) {
+      const d = editDistance(name.toLowerCase(), mod);
+      if (d > 0 && d < bestD) {
+        best = mod;
+        bestD = d;
+      }
+    }
+    return best && bestD <= 2 ? full.replace(name, best) : full;
+  });
+  const trusted = trustedIdentifiers(text);
+  if (trusted.length === 0) return text;
+  return text.replace(/\b[A-Za-z_][A-Za-z0-9_]*\b/g, (tok) => {
+    if (OCR_KEYWORDS.has(tok.toLowerCase())) return tok;
+    if (trusted.includes(tok)) return tok;
+    return nearestTrusted(tok, trusted, 1) ?? tok;
+  });
 }
 
 const STARTS_LIKE_CODE =

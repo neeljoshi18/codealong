@@ -7,6 +7,51 @@ import type { CodeSnapshot } from "@/lib/types";
 
 export type TutorialKind = "evolving" | "episodes";
 
+const STOP_IDENTS = new Set([
+  "let",
+  "const",
+  "var",
+  "function",
+  "return",
+  "else",
+  "elif",
+  "for",
+  "while",
+  "class",
+  "import",
+  "export",
+  "from",
+  "def",
+  "print",
+  "async",
+  "await",
+  "true",
+  "false",
+  "none",
+  "null",
+  "this",
+  "self",
+  "int",
+  "void",
+  "string",
+  "public",
+  "private",
+  "protected",
+  "virtual",
+  "using",
+  "namespace",
+  "template",
+  "struct",
+  "cout",
+  "cin",
+  "endl",
+  "std",
+  "include",
+  "iostream",
+  "main",
+  "input",
+]);
+
 export function significantLines(text: string): string[] {
   return text
     .split(/\r?\n/)
@@ -23,6 +68,35 @@ export function overlapRatio(a: string, b: string): number {
   return n / Math.min(A.size, B.size);
 }
 
+export function identifiers(text: string): Set<string> {
+  const out = new Set<string>();
+  const words = text.match(/\b[A-Za-z_][A-Za-z0-9_]{2,}\b/g) ?? [];
+  for (const w of words) {
+    if (STOP_IDENTS.has(w) || STOP_IDENTS.has(w.toLowerCase())) continue;
+    out.add(w);
+  }
+  return out;
+}
+
+export function identifierOverlap(a: string, b: string): number {
+  const A = identifiers(a);
+  const B = identifiers(b);
+  if (A.size === 0 || B.size === 0) return 0;
+  let n = 0;
+  for (const x of A) if (B.has(x)) n += 1;
+  return n / Math.min(A.size, B.size);
+}
+
+/** True when two buffers are the same program, not a later unrelated example. */
+export function sameExample(a: string, b: string): boolean {
+  if (!a.trim() || !b.trim()) return false;
+  const sim = overlapRatio(a, b);
+  if (sim >= 0.28) return true;
+  const id = identifierOverlap(a, b);
+  if (id >= 0.5) return true;
+  return id >= 0.34 && sim >= 0.08;
+}
+
 export function classifyTutorial(snapshots: CodeSnapshot[]): {
   kind: TutorialKind;
   reason: string;
@@ -36,8 +110,9 @@ export function classifyTutorial(snapshots: CodeSnapshot[]): {
     const prev = snapshots[i - 1];
     const next = snapshots[i];
     const sameLang = prev.language === next.language;
-    const sim = overlapRatio(snapshotSource(prev), snapshotSource(next));
-    if (sameLang && sim >= 0.32) evolve += 1;
+    const a = snapshotSource(prev);
+    const b = snapshotSource(next);
+    if (sameLang && sameExample(a, b)) evolve += 1;
     else episode += 1;
   }
   if (evolve > episode) {
@@ -112,18 +187,18 @@ export function filesForMoment(
     const base = snapshotSource(chosen);
     const incoming = snapshotSource(current);
     const merged =
-      chosen.id !== current.id
+      chosen.id !== current.id && sameExample(base, incoming)
         ? mergeEvolving(base, incoming).code
-        : base;
+        : incoming.trim()
+          ? incoming
+          : base;
     const file = current.activeFile || chosen.activeFile;
     if (merged.trim()) files[file] = merged.endsWith("\n") ? merged : `${merged}\n`;
     return files;
   }
 
-  for (const snap of ordered) {
-    if (snap.timestamp > time + 0.05) break;
-    Object.assign(files, snap.files);
-  }
+  // Episodes: only the example on screen. Do not keep leftover files
+  // from an earlier grocery/grade/etc. program in the same tutorial.
   Object.assign(files, current.files);
 
   if (kind !== "episodes") return files;
@@ -331,8 +406,8 @@ export function mergeEvolving(
   const prevIsPy =
     /^\s*(import |from |def |print\()/m.test(prev) && !/#include\b|std::/.test(prev);
 
-  // Python tutorials jump between unrelated files. Do not glue them.
-  if (sim < 0.22 && currSig >= 3 && (!prevIsCpp || currIsPy) && (prevIsPy || currIsPy || !prevIsCpp)) {
+  // Unrelated examples (Python grocery → secret_number). Never glue them.
+  if (!sameExample(prev, curr) && currSig >= 3 && (!prevIsCpp || currIsPy) && (prevIsPy || currIsPy || !prevIsCpp)) {
     return { code: ensureNl(curr), recovered: false };
   }
 
@@ -356,7 +431,11 @@ export function recoverCutoff(
   current: string,
   previous: string | undefined,
 ): { code: string; recovered: boolean } {
-  return mergeEvolving(previous ?? "", current);
+  if (!previous?.trim()) return { code: ensureNl(current), recovered: false };
+  if (!sameExample(previous, current)) {
+    return { code: ensureNl(current), recovered: false };
+  }
+  return mergeEvolving(previous, current);
 }
 
 export function preferredActiveFile(

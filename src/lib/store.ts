@@ -4,7 +4,8 @@ import { create } from "zustand";
 import { nanoid } from "nanoid";
 import { clamp, filesFingerprint } from "@/lib/utils";
 import { filesForMoment, mergeEvolving, overlapRatio, preferredActiveFile } from "@/lib/pipeline/code-story";
-import { findSnapshotIndex, snapshotAt } from "@/lib/snapshots";
+import { isSeeded } from "@/lib/seeds";
+import { findSnapshotIndex, snapshotAt, snapshotFitsPlayhead } from "@/lib/snapshots";
 import type {
   AiMode,
   Appearance,
@@ -51,6 +52,7 @@ interface StudioState {
   appearance: Appearance;
   liveReading: boolean;
   liveNote: string;
+  liveReadSeq: number;
 
   resetSession: (videoId: string) => void;
   hydrate: (videoId: string, rec: VideoReconstruction, branches?: ExperimentBranch[]) => void;
@@ -81,7 +83,8 @@ interface StudioState {
   setAiBusy: (busy: boolean) => void;
   requestSeek: (time: number) => void;
   requestPlayback: (action: "play" | "pause" | "toggle") => void;
-  applyLiveSnapshot: (snap: CodeSnapshot) => void;
+  applyLiveSnapshot: (snap: CodeSnapshot, seq?: number) => void;
+  beginLiveRead: () => number;
   resumeFollow: () => void;
   setAppearance: (appearance: Appearance) => void;
   setLiveStatus: (liveReading: boolean, liveNote?: string) => void;
@@ -117,6 +120,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   appearance: "dark",
   liveReading: false,
   liveNote: "",
+  liveReadSeq: 0,
 
   resetSession: (videoId) => {
     if (get().videoId === videoId && get().reconstruction) return;
@@ -146,6 +150,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       aiBusy: false,
       liveReading: false,
       liveNote: "",
+      liveReadSeq: 0,
     });
   },
 
@@ -202,48 +207,14 @@ export const useStudio = create<StudioState>((set, get) => ({
     const next: Partial<StudioState> = { videoTime: t };
     if (state.followVideo) {
       next.codeTime = t;
-      const rec = state.reconstruction;
-      const snap = currentSnapshotFrom(rec, t);
-      if (snap && rec) {
-        if (state.mode === "watch") {
-          if (state.activeFile && snap.files[state.activeFile] === undefined) {
-            next.activeFile = snap.activeFile;
-          }
-        } else if (state.mode === "experiment" && !state.experimentDirty) {
-          if (t < 1.5 && state.experimentSourceTime > 8) {
-            set(next);
-            return;
-          }
-          const kind = rec.tutorialKind ?? "episodes";
-          if (kind !== "evolving" && Math.abs(snap.timestamp - t) > 25) {
-            set(next);
-            return;
-          }
-          const files = filesForMoment(rec.snapshots, t, snap, kind);
-          if (kind === "evolving") {
-            const out = { ...state.experimentFiles };
-            let changed = false;
-            for (const [file, incoming] of Object.entries(files)) {
-              const merged = mergeEvolving(out[file] ?? "", incoming).code;
-              if (merged !== (out[file] ?? "")) {
-                out[file] = merged;
-                changed = true;
-              }
-            }
-            if (changed) {
-              const active = preferredActiveFile(out, snap, state.experimentActiveFile);
-              next.experimentFiles = out;
-              next.experimentSourceTime = Math.max(state.experimentSourceTime, snap.timestamp);
-              next.experimentActiveFile = active;
-              next.activeFile = active;
-            }
-          } else if (filesFingerprint(files) !== filesFingerprint(state.experimentFiles)) {
-            const active = preferredActiveFile(files, snap, state.experimentActiveFile);
-            next.experimentFiles = files;
-            next.experimentSourceTime = snap.timestamp;
-            next.experimentActiveFile = active;
-            next.activeFile = active;
-          }
+      // Watch mode can track the seed/OCR rail. Experiment mode must not:
+      // the 50ms YouTube poll was gluing grocery-at-18:34 back over a live
+      // 51:01 read (flash the real code, then revert).
+      if (state.mode === "watch") {
+        const rec = state.reconstruction;
+        const snap = currentSnapshotFrom(rec, t);
+        if (snap && rec && state.activeFile && snap.files[state.activeFile] === undefined) {
+          next.activeFile = snap.activeFile;
         }
       }
     }
@@ -321,13 +292,25 @@ export const useStudio = create<StudioState>((set, get) => ({
   openWorkbench: (forced) => {
     const t = get().videoTime;
     const rec = get().reconstruction;
-    const snap = forced ?? currentSnapshotFrom(rec, t);
-    const files = rec && snap ? filesForMoment(rec.snapshots, snap.timestamp, snap, rec.tutorialKind) : { ...(snap?.files ?? {}) };
+    const kind = rec?.tutorialKind ?? "episodes";
+    const videoId = get().videoId;
+    const allowHistoric = Boolean(videoId && isSeeded(videoId) && kind === "evolving");
+    const candidate = forced === undefined ? currentSnapshotFrom(rec, t) : forced;
+    const snap =
+      candidate &&
+      snapshotFitsPlayhead(candidate, t, { kind, currentCode: "", allowHistoric })
+        ? candidate
+        : null;
+    const files = snap
+      ? kind === "evolving" && rec
+        ? filesForMoment(rec.snapshots, t, snap, kind)
+        : { ...snap.files }
+      : {};
     const active = snap ? preferredActiveFile(files, snap, "") : Object.keys(files)[0] ?? "";
     set({
       mode: "experiment",
       followVideo: true,
-      codeTime: snap?.timestamp ?? t,
+      codeTime: t,
       activeFile: active,
       experimentFiles: files,
       experimentActiveFile: active,
@@ -414,15 +397,35 @@ export const useStudio = create<StudioState>((set, get) => ({
   requestPlayback: (action) =>
     set({ playbackRequest: { action, token: Date.now() } }),
 
-  applyLiveSnapshot: (snap) => {
+  beginLiveRead: () => {
+    const n = get().liveReadSeq + 1;
+    set({ liveReadSeq: n });
+    return n;
+  },
+
+  applyLiveSnapshot: (snap, seq) => {
     const state = get();
     if (state.mode !== "experiment" || state.experimentDirty) return;
+    if (seq !== undefined && seq !== state.liveReadSeq) return;
     const rec = state.reconstruction;
+    const kind = rec?.tutorialKind ?? "episodes";
+    const videoId = state.videoId;
+    const allowHistoric = Boolean(videoId && isSeeded(videoId) && kind === "evolving");
+    const playhead = state.videoTime;
     const file = snap.activeFile || state.experimentActiveFile;
     const incoming = snap.files[file] ?? Object.values(snap.files)[0] ?? "";
-    const prev = state.experimentFiles[file] ?? "";
+    const prev = state.experimentFiles[file] ?? Object.values(state.experimentFiles)[0] ?? "";
+    if (
+      !snapshotFitsPlayhead(snap, playhead, {
+        kind,
+        currentCode: prev,
+        allowHistoric,
+      })
+    ) {
+      return;
+    }
     const related = prev && incoming ? overlapRatio(prev, incoming) >= 0.22 : false;
-    const evolving = rec?.tutorialKind === "evolving" && related;
+    const evolving = kind === "evolving" && related;
     let files: Record<string, string>;
     if (evolving) {
       const merged = mergeEvolving(prev, incoming);
@@ -431,7 +434,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       files = { ...snap.files };
     }
     if (filesFingerprint(files) === filesFingerprint(state.experimentFiles)) {
-      set({ experimentSourceTime: snap.timestamp, codeTime: snap.timestamp });
+      set({ experimentSourceTime: snap.timestamp, codeTime: playhead });
       return;
     }
     const active = preferredActiveFile(files, snap, state.experimentActiveFile);
@@ -440,24 +443,16 @@ export const useStudio = create<StudioState>((set, get) => ({
       experimentActiveFile: active,
       activeFile: active,
       experimentSourceTime: snap.timestamp,
-      codeTime: snap.timestamp,
+      codeTime: playhead,
     });
   },
 
   resumeFollow: () => {
-    const state = get();
-    const rec = state.reconstruction;
-    const t = state.videoTime;
-    const snap = currentSnapshotFrom(rec, t);
-    const files = rec && snap ? filesForMoment(rec.snapshots, t, snap, rec.tutorialKind) : state.experimentFiles;
-    const active = snap?.activeFile ?? state.experimentActiveFile;
+    const t = get().videoTime;
     set({
       followVideo: true,
       experimentDirty: false,
-      experimentFiles: files,
-      experimentActiveFile: files[active] !== undefined ? active : (snap?.activeFile ?? state.experimentActiveFile),
-      experimentSourceTime: snap?.timestamp ?? t,
-      codeTime: snap?.timestamp ?? t,
+      codeTime: t,
     });
   },
 

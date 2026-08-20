@@ -76,14 +76,14 @@ def find_editor_box(im: Image.Image) -> tuple[int, int, int, int]:
     bright_cut = max(155.0, avg + 18)
     run = _longest_run(cols, lambda v: v >= bright_cut)
     if run[1] - run[0] >= 18:
-        left, right = _box_from_run(run, w, 64, pad=0.01)
+        left, right = _box_from_run(run, w, 64, pad=0.03)
         slice_im = im.crop((left, 0, right, h))
         rows = _profile(slice_im, "y", 40)
         ravg = sum(rows) / max(1, len(rows))
         rcut = max(150.0, ravg + 10)
         rrun = _longest_run(rows, lambda v: v >= rcut)
         if rrun[1] - rrun[0] >= 10:
-            top, bottom = _box_from_run(rrun, h, 40, pad=0.01)
+            top, bottom = _box_from_run(rrun, h, 40, pad=0.04)
         else:
             top, bottom = int(h * 0.14), int(h * 0.78)
         # Drop the line-number gutter inside the bright pane.

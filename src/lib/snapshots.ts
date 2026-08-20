@@ -1,4 +1,33 @@
+import { snapshotSource } from "@/lib/pipeline/code-from-ocr";
+import { sameExample, type TutorialKind } from "@/lib/pipeline/code-story";
 import type { CodeSnapshot } from "@/lib/types";
+
+/** A live read belongs to this playhead if it is this close (seconds). */
+export const LIVE_FRAME_RADIUS = 20;
+
+/**
+ * Grocery-at-18:34 must not win at 51:01.
+ * Featured C++ may use an older seed because that file is one growing program.
+ */
+export function snapshotFitsPlayhead(
+  snap: CodeSnapshot | null | undefined,
+  playhead: number,
+  opts?: {
+    kind?: TutorialKind;
+    currentCode?: string;
+    allowHistoric?: boolean;
+  },
+): boolean {
+  if (!snap) return false;
+  if (snap.timestamp > playhead + 1.5) return false;
+  if (Math.abs(snap.timestamp - playhead) <= LIVE_FRAME_RADIUS) return true;
+  if (opts?.allowHistoric && opts.kind === "evolving") return true;
+  const current = opts?.currentCode ?? "";
+  if (opts?.kind === "evolving" && current.trim() && sameExample(current, snapshotSource(snap))) {
+    return true;
+  }
+  return false;
+}
 
 export function findSnapshotIndex(snapshots: CodeSnapshot[], time: number): number {
   if (snapshots.length === 0) return -1;

@@ -22,7 +22,8 @@ import { useLiveScreen } from "@/lib/hooks/use-live-screen";
 import { useMediaCache } from "@/lib/hooks/use-media-cache";
 import { useReconstruction } from "@/lib/hooks/use-reconstruction";
 import { readScreen } from "@/lib/read-screen";
-import { nearestSnapshot } from "@/lib/snapshots";
+import { isSeeded } from "@/lib/seeds";
+import { nearestSnapshot, snapshotFitsPlayhead } from "@/lib/snapshots";
 import { useStudio } from "@/lib/store";
 import { clamp, cn, formatTime } from "@/lib/utils";
 
@@ -57,6 +58,7 @@ export function StudioV2({ videoId }: { videoId: string }) {
   const requestPlayback = useStudio((s) => s.requestPlayback);
   const openWorkbench = useStudio((s) => s.openWorkbench);
   const applyLiveSnapshot = useStudio((s) => s.applyLiveSnapshot);
+  const beginLiveRead = useStudio((s) => s.beginLiveRead);
   const patchReconstruction = useStudio((s) => s.patchReconstruction);
   const exitExperiment = useStudio((s) => s.exitExperiment);
   const resumeFollow = useStudio((s) => s.resumeFollow);
@@ -84,28 +86,31 @@ export function StudioV2({ videoId }: { videoId: string }) {
     const t = state.videoTime;
     const snaps = state.reconstruction?.snapshots ?? [];
     const instant = nearestSnapshot(snaps, t);
-    const kind = state.reconstruction?.tutorialKind;
-    const close =
-      instant && (kind === "evolving" || Math.abs(instant.timestamp - t) <= 25) ? instant : null;
+    const kind = state.reconstruction?.tutorialKind ?? "episodes";
+    const allowHistoric = isSeeded(videoId) && kind === "evolving";
+    const close = snapshotFitsPlayhead(instant, t, { kind, allowHistoric }) ? instant : null;
     openWorkbench(close);
-    setNote("Reading the screen…");
+    const seq = beginLiveRead();
+    setNote("Reading this frame…");
     setLiveStatus(true, `Reading screen at ${formatTime(t)}…`);
     try {
       const data = await readScreen(videoId, t, { force: true });
+      if (seq !== useStudio.getState().liveReadSeq) return;
       if (data.reconstruction) patchReconstruction(data.reconstruction);
       if (data.snapshot && !useStudio.getState().experimentDirty) {
-        applyLiveSnapshot(data.snapshot);
+        applyLiveSnapshot(data.snapshot, seq);
         setNote(data.cached ? "Using nearest known code" : "Extracted from this frame");
         setLiveStatus(false, `Updated ${formatTime(data.snapshot.timestamp)} · next read in 5s`);
       } else {
-        setNote(data.note || "Showing the nearest known code");
+        setNote(data.note || "Couldn't read this frame. Retrying…");
         setLiveStatus(false, data.note || "Next read in 5s");
       }
     } catch (err) {
-      setNote(err instanceof Error ? err.message : "Showing the nearest known code");
+      if (seq !== useStudio.getState().liveReadSeq) return;
+      setNote(err instanceof Error ? err.message : "Couldn't read this frame");
       setLiveStatus(false, "Read failed · retrying in 5s");
     }
-  }, [videoId, patchReconstruction, openWorkbench, applyLiveSnapshot, setLiveStatus]);
+  }, [videoId, patchReconstruction, openWorkbench, applyLiveSnapshot, beginLiveRead, setLiveStatus]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

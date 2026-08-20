@@ -25,8 +25,9 @@ export function CodePane({
   const snapshots = rec?.snapshots ?? EMPTY_SNAPSHOTS;
   const experimentFiles = useStudio((s) => s.experimentFiles);
   const hasBuffer =
-    snapshots.length > 0 ||
-    Object.values(experimentFiles).some((v) => typeof v === "string" && v.trim().length > 0);
+    mode === "experiment"
+      ? Object.values(experimentFiles).some((v) => typeof v === "string" && v.trim().length > 0)
+      : snapshots.length > 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-pane">
@@ -88,8 +89,10 @@ export function CodePane({
         <span>
           {dirty
             ? "you edited · follow paused"
-            : follow
-              ? "follows video"
+            : mode === "experiment"
+              ? follow
+                ? "follows this frame"
+                : "follow paused"
               : snap?.origin === "ocr" || snap?.origin === "cleaned"
                 ? "from the screen"
                 : snap?.origin === "seed"
@@ -98,7 +101,11 @@ export function CodePane({
           {mode === "experiment" ? " · editable" : ""}
         </span>
         <span>
-          {snap ? `${snap.label} · ${formatTime(codeTime)} · ${snapshots.length} snapshots` : rec?.message}
+          {mode === "experiment"
+            ? `${formatTime(codeTime)}${hasBuffer ? "" : " · reading…"}`
+            : snap
+              ? `${snap.label} · ${formatTime(codeTime)} · ${snapshots.length} snapshots`
+              : rec?.message}
         </span>
       </footer>
     </div>

@@ -1,18 +1,35 @@
 # Code Along — session handoff
 
-**Do not start work.** Wait for the human’s next instruction. This file is context only.
-
 **Local path:** `/Users/neelvaanjoshi/Downloads/interactive-youtube`  
-**GitHub:** `https://github.com/neeljoshi18/codealong` (`main`, latest `df4dec8`)  
+**GitHub:** `https://github.com/neeljoshi18/codealong` (`main`)  
 **Product name:** Code Along (repo `codealong`). Old names CodeChronos / Kronos are retired.  
 **Date of this handoff:** 2026-08-20  
 **Human Mac:** `/Users/neelvaanjoshi/Downloads/interactive-youtube` (this is **not** the droplet)
 
 ---
 
-## 0. Wait
+## 0. Last stretch (grocery stuck at 51:01 — 2026-08-20)
 
-The human explicitly asked that the **next session must not start any work**. Load this file, be ready, **do nothing** until they give a task.
+The editor showed `if budget > DILL` (grocery, ~18:34) while YouTube was on `secret_number.py` at 51:01. Live OCR sometimes flashed the right code, then reverted. Close/reopen stayed on grocery. Seek did not change the buffer.
+
+**Cause:** YouTube player polls `setVideoTime` every **50ms**. In experiment mode that function merged `snapshotAt` (latest snapshot ≤ playhead = grocery) back over the live read. `openWorkbench(null)` also meant `snapshotAt` via `??`. Python Camtasia tutorials are **episodes**, not one growing file.
+
+**Fix (do not regress):**
+- `setVideoTime` never writes `experimentFiles` while the editor is open. Live OCR owns the buffer.
+- `openWorkbench(null)` opens empty (“Reading this frame…”), not grocery.
+- `applyLiveSnapshot` ignores snapshots that do not fit the playhead (`snapshotFitsPlayhead`, 20s). Featured C++ may use historic seeds (`allowHistoric`).
+- Live read on **seek** (playhead jump ≥ 1.2s), not only every 5s / pause.
+- Stale in-flight captures dropped via `liveReadSeq`.
+- Capture fallback: nearby 20s, or seeded evolving C++; never grocery-from-18:34 at 51:01.
+- `sameExample` (line overlap + identifiers) gates `recoverCutoff` / `mergeEvolving` / `classifyTutorial`.
+- Episode `filesForMoment` is **this** example only (no leftover `app.py`).
+- OCR: keep Python indent; `DILL`→`bill` when `bill` is in the file; `import raadoa`→`random`.
+
+**Human must hard-refresh** Vercel (`codealong.neel.world` or `codealong-six.vercel.app`) after deploy. Droplet cache of old snapshots is OK: client will not apply them far from the playhead.
+
+Gemini Flash is **still deferred**.
+
+---
 
 ---
 
@@ -143,8 +160,8 @@ python3 -m yt_dlp --js-runtimes deno:$HOME/.deno/bin/deno --remote-components ej
 13. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/components/studio/studio-v1.tsx` — only if asked to revert UI  
 
 ### State / live read
-14. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/store.ts` — `openWorkbench`, `applyLiveSnapshot`, evolving merge, t=0 guard  
-15. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/hooks/use-live-screen.ts` — 5s force + pause-edge (no recursion)  
+14. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/store.ts` — `openWorkbench` empty if snap doesn't fit playhead; `applyLiveSnapshot` + `liveReadSeq`; **setVideoTime does not write experimentFiles**  
+15. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/hooks/use-live-screen.ts` — 5s force + pause-edge + **seek jump** (no recursion)  
 16. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/read-screen.ts` — OPFS only if already cached, else server  
 17. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/hooks/use-media-cache.ts` — `/prepare` + poll; no youtubei hang  
 17a. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/paths.ts` — `/tmp` on Vercel, `./data` locally  
@@ -160,12 +177,12 @@ python3 -m yt_dlp --js-runtimes deno:$HOME/.deno/bin/deno --remote-components ej
 22. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/app/api/videos/[videoId]/capture/route.ts`  
 23. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/pipeline/screen-capture.ts`  
 24. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/pipeline/media.ts` — server yt-dlp window + full file (local/droplet)  
-25. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/pipeline/code-from-ocr.ts` — chrome gate, C++ keywords, normalize  
-26. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/pipeline/code-story.ts` — episodes vs evolving, `mergeEvolving`, `filesForMoment`  
+25. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/pipeline/code-from-ocr.ts` — chrome gate, indent keep, `repairOcrTypos` (DILL→bill)  
+26. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/pipeline/code-story.ts` — `sameExample`, episodes vs evolving, `mergeEvolving`, `filesForMoment`  
 27. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/pipeline/run.ts` — `loadOrStart` / `composeSeed` / no-key ready stub  
 28. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/pipeline/ingest.ts`  
 29. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/pipeline/consolidate.ts`  
-30. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/snapshots.ts`  
+30. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/snapshots.ts` — `snapshotFitsPlayhead` / `LIVE_FRAME_RADIUS`  
 31. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/app/api/videos/[videoId]/status/route.ts`  
 32. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/app/api/videos/[videoId]/prepare/route.ts`  
 33. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/app/api/videos/[videoId]/forget/route.ts`  
@@ -174,6 +191,7 @@ python3 -m yt_dlp --js-runtimes deno:$HOME/.deno/bin/deno --remote-components ej
 36. `/Users/neelvaanjoshi/Downloads/interactive-youtube/scripts/ocr_frame.py` — VS+webcam crop  
 37. `/Users/neelvaanjoshi/Downloads/interactive-youtube/scripts/harvest_screens.py`  
 38. `/Users/neelvaanjoshi/Downloads/interactive-youtube/scripts/test_merge_evolving.ts`  
+38a. `/Users/neelvaanjoshi/Downloads/interactive-youtube/scripts/test_ocr_filter.ts` — grocery vs secret, DILL, playhead  
 
 ### Client engine (browser OPFS; CORS often blocks YouTube bytes)
 39. `/Users/neelvaanjoshi/Downloads/interactive-youtube/src/lib/client-engine/capture.ts`  

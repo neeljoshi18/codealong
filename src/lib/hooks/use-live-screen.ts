@@ -16,17 +16,19 @@ export function useLiveScreen(videoId: string) {
   const applyLiveSnapshot = useStudio((s) => s.applyLiveSnapshot);
   const patchReconstruction = useStudio((s) => s.patchReconstruction);
   const setLiveStatus = useStudio((s) => s.setLiveStatus);
+  const beginLiveRead = useStudio((s) => s.beginLiveRead);
   const inFlight = useRef(false);
+  const flightGen = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     let timer = 0;
     let abort: AbortController | null = null;
 
-    const schedule = (ms: number) => {
+    const schedule = (ms: number, reason: "interval" | "pause" = "interval") => {
       window.clearTimeout(timer);
       if (cancelled) return;
-      timer = window.setTimeout(() => void tick("interval"), ms);
+      timer = window.setTimeout(() => void tick(reason), ms);
     };
 
     const tick = async (reason: "interval" | "pause") => {
@@ -46,10 +48,17 @@ export function useLiveScreen(videoId: string) {
         return;
       }
 
+      if (state.videoTime < 1.5 && state.experimentSourceTime > 8) {
+        if (state.playing) schedule(INTERVAL_MS);
+        return;
+      }
+
       inFlight.current = true;
+      const myFlight = ++flightGen.current;
       abort?.abort();
       abort = new AbortController();
       const t = state.videoTime;
+      const seq = beginLiveRead();
       setLiveStatus(
         true,
         reason === "pause" ? `Paused · completing ${formatTime(t)}…` : `Reading screen at ${formatTime(t)}…`,
@@ -61,9 +70,10 @@ export function useLiveScreen(videoId: string) {
           signal: abort.signal,
         });
         if (cancelled || useStudio.getState().mode !== "experiment") return;
+        if (seq !== useStudio.getState().liveReadSeq) return;
         if (data.reconstruction) patchReconstruction(data.reconstruction);
         if (data.snapshot && !useStudio.getState().experimentDirty) {
-          applyLiveSnapshot(data.snapshot);
+          applyLiveSnapshot(data.snapshot, seq);
           const playing = useStudio.getState().playing;
           setLiveStatus(
             false,
@@ -78,8 +88,10 @@ export function useLiveScreen(videoId: string) {
         if (cancelled || (err instanceof DOMException && err.name === "AbortError")) return;
         setLiveStatus(false, "Read failed · retrying in 5s");
       } finally {
-        inFlight.current = false;
-        if (!cancelled && useStudio.getState().playing) schedule(INTERVAL_MS);
+        if (flightGen.current === myFlight) {
+          inFlight.current = false;
+          if (!cancelled && useStudio.getState().playing) schedule(INTERVAL_MS);
+        }
       }
     };
 
@@ -87,11 +99,15 @@ export function useLiveScreen(videoId: string) {
       if (cancelled || !prev) return;
       const paused = prev.playing && !s.playing;
       const resumed = !prev.playing && s.playing;
+      const jumped = Math.abs(s.videoTime - prev.videoTime) >= 1.2;
       if (paused && s.mode === "experiment" && !s.experimentDirty) {
         window.clearTimeout(timer);
         void tick("pause");
       } else if (resumed && s.mode === "experiment") {
         schedule(INTERVAL_MS);
+      } else if (jumped && s.mode === "experiment" && !s.experimentDirty) {
+        window.clearTimeout(timer);
+        schedule(350, "pause");
       }
     });
 
@@ -102,5 +118,5 @@ export function useLiveScreen(videoId: string) {
       window.clearTimeout(timer);
       unsub();
     };
-  }, [videoId, applyLiveSnapshot, patchReconstruction, setLiveStatus]);
+  }, [videoId, applyLiveSnapshot, beginLiveRead, patchReconstruction, setLiveStatus]);
 }

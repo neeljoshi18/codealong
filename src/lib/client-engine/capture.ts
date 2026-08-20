@@ -1,5 +1,5 @@
 import { extractCodeOnly, isUsableCode } from "@/lib/pipeline/code-from-ocr";
-import { previousSameFile, recoverCutoff } from "@/lib/pipeline/code-story";
+import { previousSameFile, recoverCutoff, sameExample } from "@/lib/pipeline/code-story";
 import type { CodeSnapshot, VideoReconstruction } from "@/lib/types";
 import { ensureClientVideo } from "@/lib/client-engine/download";
 import { extractPngFrame } from "@/lib/client-engine/frame";
@@ -39,7 +39,7 @@ export async function captureInBrowser(
   const language = rec?.language && rec.language !== "plaintext" ? rec.language : guessLang(filtered.code);
   const file = fileFor(language);
   let code = filtered.code.endsWith("\n") ? filtered.code : `${filtered.code}\n`;
-  let label = "Extracted from screen";
+  const label = "Extracted from screen";
   let snapshot: CodeSnapshot = {
     id: `ocr${String(Math.floor(time)).padStart(6, "0")}`,
     timestamp: time,
@@ -52,7 +52,7 @@ export async function captureInBrowser(
   if (rec) {
     const prior = previousSameFile(rec.snapshots, time, file);
     const priorText = prior ? (prior.files[file] ?? Object.values(prior.files)[0]) : undefined;
-    if (priorText) {
+    if (priorText && sameExample(priorText, code)) {
       const recovered = recoverCutoff(code, priorText);
       code = recovered.code;
       snapshot = {
