@@ -46,6 +46,7 @@ export function normalizeOcrLine(line: string): string {
   let s = line.replace(/\u2018|\u2019/g, "'").replace(/\u201c|\u201d/g, '"');
   s = s.replace(/^\s*[|]+/, (m) => " ".repeat(Math.min(4, m.length)));
   s = s.replace(/[|]+\s*$/g, "");
+  s = s.replace(/[=]=»/g, "=").replace(/=»/g, "=").replace(/«=/g, "=");
   s = s.replace(/\b(eint|Sint|sint)\s+main\b/g, "int main");
   s = s.replace(/^\s*tinclude\b/, "#include");
   s = s.replace(/^\s*#\s*include\b/, "#include");
@@ -56,8 +57,14 @@ export function normalizeOcrLine(line: string): string {
   s = s.replace(/\bemployee[lIi\]]+\d*/g, "employee1");
   s = s.replace(/(\w)\.\s+(\w)/g, "$1.$2");
   s = s.replace(/\bAgel\b/g, "Age");
-  s = s.replace(/\bAges]\b/g, "Age;");
+  s = s.replace(/\bAges\]/g, "Age;");
+  s = s.replace(/\b(CONSOLE|gonsole|cons0le|GONSOLE)\b/gi, "console");
+  s = s.replace(/\bconsole\s*\.\s*[Ll]og\b/g, "console.log");
+  s = s.replace(/^(\s*(?:\d{1,3}[:.]?\s+)?)(?:\\+|[\/|])?et\b(?=\s+[\w$]+\s*=)/, "$1let");
+  s = s.replace(/^(\s*(?:\d{1,3}[:.]?\s+)?)[RTV]et\b(?=\s+[\w$]+)/, "$1let");
+  s = s.replace(/^(\s*(?:\d{1,3}[:.]?\s+)?)\\et\b/, "$1let");
   s = s.replace(/""+/g, '"');
+  s = s.replace(/^(\s*[{}();]+)\s*=+\s*$/, "$1");
   s = s.replace(/;\s+[I|l]\s*$/g, ";");
   s = s.replace(/"j\s*$/g, '"');
   s = s.replace(/[ \t]+$/g, "");
@@ -135,19 +142,21 @@ export function extractCodeOnly(raw: string): { code: string; score: number } {
     const isComment = /^\s*(\/\/|#|\/\*|\*)/.test(trimmed);
     const isMarkup = /^\s*<\/?[a-zA-Z]/.test(trimmed);
     const isBrace = /^\s*[{}();,[\]]+\s*$/.test(trimmed);
-    const isAssign = /^\s*[\w$.]+\s*=/.test(trimmed);
+    const isAssign = /^\s*[\w$.]+\s*=/.test(trimmed) || /^\s*(let|const|var)\s+[\w$]+\s*=/.test(trimmed);
+    const isProp = /^\s*[\w$]+\s*:/.test(trimmed) && !/https?:/.test(trimmed);
     const isAccess = /^\s*(public|private|protected)\s*:/.test(trimmed);
     const isInclude = /^\s*#\s*include\b/.test(trimmed);
     const isUsing = /^\s*using\s+/.test(trimmed);
     const isStream = /std::|<<|>>/.test(trimmed);
     const isDecl = /^\s*[\w:<>*&]+\s+[\w]+\s*([(;=]|::)/.test(trimmed);
-    const isCall = /\w+\s*\(.*\)\s*;?\s*$/.test(trimmed);
+    const isCall = /\w+\s*\(.*\)\s*;?\s*$/.test(trimmed) || /\bconsole\.log\b/.test(trimmed);
     if (
       !isKeyword &&
       !isComment &&
       !isMarkup &&
       !isBrace &&
       !isAssign &&
+      !isProp &&
       !isAccess &&
       !isInclude &&
       !isUsing &&
@@ -300,11 +309,14 @@ function nearestTrusted(tok: string, trusted: string[], maxDist: number): string
   return bestD <= maxDist ? best : null;
 }
 
+const JS_APIS = ["console", "undefined", "null", "length", "push", "filter", "map", "stringify", "parse"];
+
 /** Fix Tesseract near-misses (DILL→bill, raadoa→random) using tokens already in the file. */
 export function repairOcrTypos(code: string): string {
   if (!code.trim()) return code;
   let text = code.replace(/\b(print|input|len|range|int|str|float)\s+\(/g, "$1(");
   text = text.replace(/\bquess\b/gi, "guess");
+  text = text.replace(/\bconsole\s*\.\s*[Ll]og\b/g, "console.log");
   if (/\bbudget\b/.test(text)) {
     text = text.replace(/\b(DILL|PILL|BIIL|8ILL|B1LL)\b/g, "bill");
   }
@@ -320,6 +332,19 @@ export function repairOcrTypos(code: string): string {
       }
     }
     return best && bestD <= 2 ? full.replace(name, best) : full;
+  });
+  text = text.replace(/\b[A-Za-z_][A-Za-z0-9_]*\b/g, (tok) => {
+    if (OCR_KEYWORDS.has(tok.toLowerCase())) return tok;
+    let best: string | null = null;
+    let bestD = 2;
+    for (const api of JS_APIS) {
+      const d = editDistance(tok.toLowerCase(), api);
+      if (d > 0 && d < bestD && Math.abs(api.length - tok.length) <= 1) {
+        best = api;
+        bestD = d;
+      }
+    }
+    return best && bestD <= 1 ? best : tok;
   });
   const trusted = trustedIdentifiers(text);
   if (trusted.length === 0) return text;

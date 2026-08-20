@@ -133,7 +133,9 @@ function ytDlpBaseArgs(dest: string): string[] {
     "-m",
     "yt_dlp",
     "-f",
-    "b[height<=720]/b[height<=480]/18/best",
+    "bv*[height<=720][height>=480]+ba/b[height<=720][height>=480]/bv*[height<=720]+ba/b[height<=720]/18/best",
+    "--merge-output-format",
+    "mp4",
     "--no-playlist",
     "--no-warnings",
     "--newline",
@@ -216,7 +218,7 @@ export async function ensureFullVideo(videoId: string): Promise<string> {
   if (existing) return existing;
   const job = (async () => {
     setStatus(videoId, 12, "Downloading a compact copy for screen reads…");
-    await downloadTo(dest, ["--", videoId], videoId, 12, 96, 120_000);
+    await downloadTo(dest, ["--", videoId], videoId, 12, 96, 180_000);
     setStatus(videoId, 100, "Cached on this machine");
     return dest;
   })().finally(() => {
@@ -244,7 +246,7 @@ export async function ensureWindow(videoId: string, time: number): Promise<strin
         videoId,
         8,
         88,
-        50_000,
+        80_000,
       );
       setStatus(videoId, 90, "This moment is ready");
       return dest;

@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+__pycache__/
 
 # debug
 npm-debug.log*
@@ -41,6 +42,7 @@ yarn-error.log*
 /data/videos
 /data/tmp
 /data/capture
+/data/ocr-eval
 
 # YouTube cookies for droplet yt-dlp (never commit)
 /deploy/youtube-cookies.txt

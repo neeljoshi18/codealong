@@ -8,7 +8,18 @@
 
 ---
 
-## 0. Last stretch (grocery stuck at 51:01 — 2026-08-20)
+## 0. Last stretch (OCR transcription — 2026-08-20)
+
+Grocery/playhead is fixed. Next gap: **reading the frame is a gamble**. Two causes, both now patched — do not regress:
+
+1. **Wrong pane.** `find_editor_box` treated the white Chrome console as a “bright editor island”, so Mosh-style layouts OCR’d the browser, not the code. Dark-left + bright-right now wins. Top crop is ~7% (was 15%, which ate `let name`).
+2. **Soft pixels.** Dark-theme prep uses **max(R,G,B)** then invert so cyan `console` / purple `let` stay ink. yt-dlp will take 720p when YouTube offers it (`bv*[height<=720]+ba`); many videos (including Mosh) only serve 360p without cookies — do not delete those caches. Glyph repairs: `\et`/`Vet`→`let`, `gonsole. Log`→`console.log`, `=»`→`=`. Object fields (`name: 'Mosh'`) are kept. Indent reconstruction is **not** this stretch.
+
+Verify after hard refresh: `/watch/W6NZfCO5SIk?t=1720` Open editor → `let name = 'Mosh'` (not the console `typeof age`). `/watch/wN0x9eZLix4?t=900` still `#include Employee`. Grocery checks at `nFn2frlTves` still hold.
+
+---
+
+## 0b. Prior stretch (grocery stuck at 51:01 — 2026-08-20)
 
 The editor showed `if budget > DILL` (grocery, ~18:34) while YouTube was on `secret_number.py` at 51:01. Live OCR sometimes flashed the right code, then reverted. Close/reopen stayed on grocery. Seek did not change the buffer.
 
@@ -229,6 +240,7 @@ python3 -m yt_dlp --js-runtimes deno:$HOME/.deno/bin/deno --remote-components ej
 - `/Users/neelvaanjoshi/Downloads/interactive-youtube/data/capture/`  
 
 Useful local URLs:
+- http://localhost:3000/watch/W6NZfCO5SIk?t=1720  
 - http://localhost:3000/watch/W6NZfCO5SIk?t=19:26  
 - http://localhost:3000/watch/wN0x9eZLix4?t=900  
 - http://localhost:3000/watch/wN0x9eZLix4?t=1260  
@@ -247,6 +259,8 @@ Product: Code Along. Not CodeChronos. Default UI is studio-v2.tsx: plain YouTube
 Kinds: episodes (Mosh JS W6NZfCO5SIk + lesson.js) vs evolving (C++ wN0x9eZLix4 one growing main.cpp, mergeEvolving, no in-browser C++ run). Python kqtD5dpn9C8 is syllabus-only.
 
 Live follow: use-live-screen.ts every 5s force:true; pause = immediate catch-up; subscribe must use prev.playing vs s.playing or you get Maximum call stack size exceeded. Monaco live updates via monaco-apply.ts (no setValue jump to top). filesForMoment evolving = latest ≤ time, not walk-merge. Capture never returns FRAME_NOT_CODE; fallback latest ≤ time not future seed.
+
+OCR: crop the editor, never the white Chrome console (dark-left/bright-right wins over “bright island”). Top crop ~7%. Dark prep = max(R,G,B) then invert. Indent is the next gap, not this stretch.
 
 No XAI_API_KEY required. Never full-video vision, never dirty Tesseract as truth, never transparent IDE overlay.
 

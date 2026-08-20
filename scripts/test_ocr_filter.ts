@@ -75,6 +75,40 @@ if (repairOcrTypos("if quess is too big").includes("quess")) {
   throw new Error("quess not repaired to guess");
 }
 
+const moshLets = extractCodeOnly(`2 let name = 'Mosh';
+3 let age = 30;
+4 \\et isApproved = false;
+5 let firstName =» undefined;
+6 let selectedColor = null;
+`);
+if (!moshLets.code.includes("let name = 'Mosh'") || !moshLets.code.includes("let isApproved")) {
+  throw new Error("Mosh lets not recovered:\n" + moshLets.code);
+}
+if (moshLets.code.includes("\\et") || moshLets.code.includes("=»")) {
+  throw new Error("glyph leftovers:\n" + moshLets.code);
+}
+
+const person = extractCodeOnly(`2 let person = {
+3   name: 'Mosh',
+4   age: 30
+5 };
+7 // Dot Notation
+8 person.name = 'John';
+13 gonsole. Log(person);
+`);
+if (!person.code.includes("let person") || !person.code.includes("name: 'Mosh'") || !person.code.includes("console.log")) {
+  throw new Error("object + console.log not recovered:\n" + person.code);
+}
+const braces = extractCodeOnly(`let person = {
+name: 'Mosh',
+age: 30
+};                                    =
+person.name = 'John';
+`);
+if (!braces.code.includes("};") || braces.code.includes("};=")) {
+  throw new Error("object close brace lost:\n" + braces.code);
+}
+
 const raadoa = repairOcrTypos(`import raadoa\nsecret_number = random.randint(1, 100)\n`);
 if (raadoa.includes("raadoa") || !raadoa.includes("import random")) {
   throw new Error("import raadoa not repaired:\n" + raadoa);

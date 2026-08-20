@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageFilter, ImageOps
 
 
 def _mean(im: Image.Image) -> float:
@@ -62,43 +62,67 @@ def _box_from_run(run: tuple[int, int], total: int, bins: int, pad: float = 0.0)
 
 
 def find_editor_box(im: Image.Image) -> tuple[int, int, int, int]:
-    """Return (left, top, right, bottom) of the code buffer."""
+    """Return (left, top, right, bottom) of the code buffer.
+
+    Dark-left + bright-right (Mosh: VS Code | Chrome console) must win over the
+    "bright island" detector, or we OCR the browser instead of the editor.
+    """
     w, h = im.size
-    mid = im.crop((0, int(h * 0.12), w, int(h * 0.78)))
-    cols = _profile(mid, "x", 64)
+    cols = _profile(im, "x", 64)
     avg = sum(cols) / max(1, len(cols))
     left_mean = sum(cols[:16]) / 16
     right_mean = sum(cols[48:]) / 16
     cam = _mean(im.crop((int(w * 0.70), int(h * 0.52), w, h)))
 
-    # Light-theme editor (PyCharm, VS Code light): the buffer is a bright island
-    # next to a darker file tree / console.
+    # Dark editor on the left, white browser / slides on the right.
+    if left_mean < 95 and right_mean > left_mean + 30:
+        threshold = (left_mean + right_mean) / 2
+        split = 40
+        for i in range(16, 56):
+            if cols[i] > threshold:
+                split = i
+                break
+        right = min(w, int((split / 64.0) * w) + int(w * 0.01))
+        return (
+            int(w * 0.04),
+            int(h * 0.07),
+            max(right, int(w * 0.38)),
+            int(h * 0.90),
+        )
+
+    # Light-theme editor island (PyCharm, VS light). Reject a right-side
+    # white panel (browser / webcam backdrop).
     bright_cut = max(155.0, avg + 18)
     run = _longest_run(cols, lambda v: v >= bright_cut)
-    if run[1] - run[0] >= 18:
-        left, right = _box_from_run(run, w, 64, pad=0.03)
+    run_center = (run[0] + run[1]) / 2 if run[1] > run[0] else 32
+    if run[1] - run[0] >= 16 and run_center <= 44:
+        left, right = _box_from_run(run, w, 64, pad=0.02)
         slice_im = im.crop((left, 0, right, h))
         rows = _profile(slice_im, "y", 40)
         ravg = sum(rows) / max(1, len(rows))
         rcut = max(150.0, ravg + 10)
         rrun = _longest_run(rows, lambda v: v >= rcut)
         if rrun[1] - rrun[0] >= 10:
-            top, bottom = _box_from_run(rrun, h, 40, pad=0.04)
+            top, bottom = _box_from_run(rrun, h, 40, pad=0.03)
         else:
-            top, bottom = int(h * 0.14), int(h * 0.78)
-        # Drop the line-number gutter inside the bright pane.
-        left = left + max(8, int((right - left) * 0.04))
+            top, bottom = int(h * 0.08), int(h * 0.88)
+        left = left + max(8, int((right - left) * 0.035))
         return left, top, right, bottom
 
-    # Dark IDE + talking head (CodeBeauty / VS).
-    if cam > 90:
-        return int(w * 0.10), int(h * 0.12), int(w * 0.62), int(h * 0.78)
+    # Dark IDE + talking head (skin in the corner, not a white browser ~255).
+    if 90 < cam < 210:
+        return int(w * 0.09), int(h * 0.07), int(w * 0.63), int(h * 0.80)
 
-    # Dark IDE, editor on the darker or left side, browser/cam on the right.
     if right_mean > left_mean + 18:
-        return int(w * 0.08), int(h * 0.15), int(w * 0.48), int(h * 0.82)
+        return int(w * 0.06), int(h * 0.08), int(w * 0.48), int(h * 0.88)
 
-    return int(w * 0.08), int(h * 0.14), int(w * 0.92), int(h * 0.80)
+    return int(w * 0.06), int(h * 0.08), int(w * 0.92), int(h * 0.88)
+
+
+def _max_channel_gray(im: Image.Image) -> Image.Image:
+    """Keep cyan/purple syntax tokens as ink. ITU luma washes them out."""
+    r, g, b = im.convert("RGB").split()
+    return ImageChops.lighter(ImageChops.lighter(r, g), b)
 
 
 def prepare(path: Path) -> Path:
@@ -108,17 +132,55 @@ def prepare(path: Path) -> Path:
         right = min(im.size[0], left + 8)
     if bottom <= top + 4:
         bottom = min(im.size[1], top + 8)
-    im = im.crop((left, top, right, bottom)).convert("L")
-    hist = im.resize((32, 32)).histogram()
-    mean = sum(i * hist[i] for i in range(256)) / max(1, sum(hist))
+    im = im.crop((left, top, right, bottom))
+    mean = _mean(im)
     if mean < 140:
-        im = ImageOps.invert(im)
+        im = ImageOps.invert(_max_channel_gray(im))
+    else:
+        im = im.convert("L")
     im = ImageOps.autocontrast(im, cutoff=2)
-    im = im.resize((im.size[0] * 3, im.size[1] * 3), Image.Resampling.LANCZOS)
+    short = min(im.size)
+    factor = 4 if short < 220 else 3 if short < 420 else 2
+    im = im.resize((im.size[0] * factor, im.size[1] * factor), Image.Resampling.LANCZOS)
     im = im.filter(ImageFilter.SHARPEN)
     out = path.with_suffix(".prep.png")
     im.save(out)
     return out
+
+
+def _codey(text: str) -> int:
+    t = text.lower()
+    hits = 0
+    for tok in (
+        "let ",
+        "const ",
+        "function ",
+        "console",
+        "return ",
+        "def ",
+        "import ",
+        "class ",
+        "public",
+        "#include",
+        "std::",
+        "print(",
+        "elif",
+        "void ",
+        "int ",
+    ):
+        if tok in t:
+            hits += 1
+    return hits
+
+
+def _tess(tess: str, image: Path, psm: str) -> str:
+    proc = subprocess.run(
+        [tess, str(image), "stdout", "--psm", psm, "-c", "preserve_interword_spaces=1"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    return proc.stdout.decode("utf-8", errors="replace")
 
 
 def main() -> int:
@@ -127,13 +189,13 @@ def main() -> int:
         return 2
     prepared = prepare(Path(sys.argv[1]))
     tess = sys.argv[2] if len(sys.argv) > 2 else "tesseract"
-    proc = subprocess.run(
-        [tess, str(prepared), "stdout", "--psm", "6", "-c", "preserve_interword_spaces=1"],
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-    sys.stdout.write(proc.stdout.decode("utf-8", errors="replace"))
+    a = _tess(tess, prepared, "6")
+    if _codey(a) < 2:
+        b = _tess(tess, prepared, "4")
+        text = b if _codey(b) > _codey(a) else a
+    else:
+        text = a
+    sys.stdout.write(text)
     return 0
 
 
