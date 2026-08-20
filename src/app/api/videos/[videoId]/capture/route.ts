@@ -94,6 +94,7 @@ export async function POST(
       snapshot: snap,
       cached: true,
       note: snap ? "Couldn't read this frame; using the nearest known code." : emptyNote,
+      detail: reason || undefined,
     });
   }
 }

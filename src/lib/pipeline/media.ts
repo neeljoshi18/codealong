@@ -75,23 +75,43 @@ function setStatus(videoId: string, progress: number, message: string) {
   upsertJob(videoId, { status: progress >= 100 ? "ready" : "fetching", progress, message });
 }
 
+export function mediaCookieInfo(): { ok: boolean; rows: number; note: string } {
+  const p = cookiesFile();
+  if (!p) return { ok: false, rows: 0, note: lastCookieNote || "no cookie file" };
+  return { ok: true, rows: lastCookieRows, note: lastCookieNote };
+}
+
+let lastCookieNote = "";
+let lastCookieRows = 0;
+
 function cookiesFile(): string | null {
   const src = firstExisting([
+    process.env.YTDLP_COOKIES_FILE,
     "/secrets/youtube-cookies.txt",
     join(process.cwd(), "deploy/youtube-cookies.txt"),
     join(dataRoot(), "youtube-cookies.txt"),
   ]);
-  if (!src) return null;
+  if (!src) {
+    lastCookieNote = "missing";
+    lastCookieRows = 0;
+    return null;
+  }
   try {
     const rows = readFileSync(src, "utf8")
       .split("\n")
       .filter((l) => l && !l.startsWith("#")).length;
-    if (rows < 3) return null;
-    // yt-dlp rewrites the jar. Never point it at a :ro mount.
+    lastCookieRows = rows;
+    if (rows < 3) {
+      lastCookieNote = `${src} too small`;
+      return null;
+    }
     const dest = "/tmp/codealong-youtube-cookies.txt";
     copyFileSync(src, dest);
+    lastCookieNote = `ok ${rows} from ${src}`;
     return dest;
-  } catch {
+  } catch (err) {
+    lastCookieNote = err instanceof Error ? err.message : "cookie copy failed";
+    lastCookieRows = 0;
     return null;
   }
 }
@@ -112,7 +132,7 @@ function ytDlpBaseArgs(dest: string): string[] {
     "-m",
     "yt_dlp",
     "-f",
-    "18/best[height<=360]/best[height<=720]",
+    "b[height<=720]/b[height<=480]/18/best",
     "--no-playlist",
     "--no-warnings",
     "--newline",

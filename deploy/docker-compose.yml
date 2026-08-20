@@ -10,6 +10,7 @@ services:
     environment:
       PORT: "3001"
       HOSTNAME: "0.0.0.0"
+      YTDLP_COOKIES_FILE: /secrets/youtube-cookies.txt
     volumes:
       - codealong-data:/app/data
       - ./youtube-cookies.txt:/secrets/youtube-cookies.txt:ro
