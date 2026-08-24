@@ -7,13 +7,11 @@
 #   STAGING_SSH_KEY  = private ed25519 that logs in as neel
 name: Deploy droplet
 
+# Droplet is currently off (cost). Do not SSH it on every git push.
+# When it is back: keep this file, set CAPTURE_BACKEND_URL on Vercel, and
+# run this workflow from the Actions tab (workflow_dispatch).
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**/*.md"
-      - "HANDOFF.md"
 
 concurrency:
   group: codealong-droplet

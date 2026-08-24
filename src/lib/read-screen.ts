@@ -25,7 +25,7 @@ async function readOnServer(
       live: Boolean(opts?.live),
       force: Boolean(opts?.force),
     }),
-    signal: opts?.signal,
+    signal: opts?.signal ?? AbortSignal.timeout(20_000),
   });
   const data = (await res.json()) as ScreenRead;
   const snap = data.snapshot && isUsableSnapshot(data.snapshot) ? data.snapshot : null;

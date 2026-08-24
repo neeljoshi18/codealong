@@ -57,6 +57,7 @@ export function useMediaCache(videoId: string) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ time, full: false }),
+        signal: AbortSignal.timeout(8_000),
       })
         .then((res) => res.json())
         .then((data: StatusPayload) => apply(data))
@@ -66,7 +67,9 @@ export function useMediaCache(videoId: string) {
     const poll = async () => {
       try {
         const t = useStudio.getState().videoTime;
-        const res = await fetch(`/api/videos/${videoId}/status?t=${encodeURIComponent(String(t))}`);
+        const res = await fetch(`/api/videos/${videoId}/status?t=${encodeURIComponent(String(t))}`, {
+          signal: AbortSignal.timeout(8_000),
+        });
         if (!res.ok || cancelled) return;
         const data = (await res.json()) as StatusPayload;
         const done = apply(data);

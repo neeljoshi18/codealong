@@ -20,7 +20,9 @@ export function useReconstruction(videoId: string) {
 
     async function pull() {
       try {
-        const res = await fetch(`/api/videos/${videoId}/status`);
+        const res = await fetch(`/api/videos/${videoId}/status`, {
+          signal: AbortSignal.timeout(8_000),
+        });
         if (!res.ok || cancelled) return;
         const data = (await res.json()) as {
           reconstruction?: VideoReconstruction;
@@ -36,7 +38,9 @@ export function useReconstruction(videoId: string) {
 
     void (async () => {
       try {
-        const res = await fetch(`/api/videos/${videoId}`);
+        const res = await fetch(`/api/videos/${videoId}`, {
+          signal: AbortSignal.timeout(8_000),
+        });
         if (res.ok && !cancelled) {
           const data = (await res.json()) as { reconstruction: VideoReconstruction };
           const branches = await fetchBranches(videoId);
@@ -59,7 +63,9 @@ export function useReconstruction(videoId: string) {
 
 async function fetchBranches(videoId: string): Promise<ExperimentBranch[]> {
   try {
-    const res = await fetch(`/api/branches?videoId=${videoId}`);
+    const res = await fetch(`/api/branches?videoId=${videoId}`, {
+      signal: AbortSignal.timeout(8_000),
+    });
     if (!res.ok) return [];
     const data = (await res.json()) as { branches?: ExperimentBranch[] };
     return data.branches ?? [];

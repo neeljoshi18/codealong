@@ -8,7 +8,19 @@
 
 ---
 
-## 0. Last stretch (OCR transcription — 2026-08-20)
+## 0. Last stretch (droplet off — site must load on Vercel — 2026-08-20)
+
+The DigitalOcean droplet (`206.189.129.31`, also `status.neel.world`) is **powered off** (cost). Keep `deploy/` and `deploy-droplet.yml` — do not delete them. Re-enable later with `CAPTURE_BACKEND_URL` + Actions **workflow_dispatch**.
+
+**Why the pretty URL died:** `codealong.neel.world` is an **A record to 206.189.129.31**. That IP no longer answers, so the browser hangs. `https://codealong-six.vercel.app` still served HTML in ~1s. Separately, Vercel **always** proxied `/api/.../status|prepare|capture` to `https://status.neel.world/codealong-ocr` with a **90s** timeout, so even the Vercel URL felt stuck after open.
+
+**Code fix (do not regress):** `captureBackendOrigin()` is **only** `CAPTURE_BACKEND_URL`. No default to the droplet. Status/prepare proxy timeout 2.5s if that env is set and the host is dead. Client fetches abort at 8s. Droplet workflow is **workflow_dispatch only** (no push-to-SSH).
+
+**Human DNS (GoDaddy, `neel.world`):** delete the A record `codealong` → `206.189.129.31`. Add **CNAME** `codealong` → `cname.vercel-dns.com`. Until that propagates, use https://codealong-six.vercel.app . Featured demos (seeds) work on Vercel; public live OCR does not until a droplet is back.
+
+---
+
+## 0b. Prior stretch (OCR transcription — 2026-08-20)
 
 Grocery/playhead is fixed. Next gap: **reading the frame is a gamble**. Two causes, both now patched — do not regress:
 
@@ -19,7 +31,7 @@ Verify after hard refresh: `/watch/W6NZfCO5SIk?t=1720` Open editor → `let name
 
 ---
 
-## 0b. Prior stretch (grocery stuck at 51:01 — 2026-08-20)
+## 0c. Prior stretch (grocery stuck at 51:01 — 2026-08-20)
 
 The editor showed `if budget > DILL` (grocery, ~18:34) while YouTube was on `secret_number.py` at 51:01. Live OCR sometimes flashed the right code, then reverted. Close/reopen stayed on grocery. Seek did not change the buffer.
 
@@ -100,13 +112,13 @@ A **website cannot** `fetch` YouTube mp4 bytes (CORS on `googlevideo.com`). Ifra
 | --- | --- |
 | GitHub | `https://github.com/neeljoshi18/codealong` `main` |
 | Vercel | Project `codealong` `prj_BU7FzoYl4TQftmTGo4jvH1NErvOA`, team `neeljoshi18` / `team_H3JV0aAVhBBfXAgZ7X3BiTiM`. **Live:** https://codealong-six.vercel.app and https://codealong-neeljoshi18.vercel.app Auth off. Auto-deploys on push to `main`. Dashboard: https://vercel.com/neeljoshi18/codealong |
-| Custom domain | **`codealong.neel.world` is a CNAME to `cname.vercel-dns.com`** (Vercel). Live OCR is proxied from Vercel → `https://status.neel.world/codealong-ocr` (droplet Caddy) until GoDaddy A record `codealong` → `206.189.129.31`. |
-| Droplet | `206.189.129.31` (same as `status.neel.world`). User **`neel`** not `root`. Caddy in AI-Manager compose (`~/ai-manager/deploy/Caddyfile`) has the `codealong.neel.world` snippet → `172.17.0.1:3001`. Container on host `:3001` (campus cannot reach 3001; Caddy 443 would, **if DNS pointed here**). |
+| Custom domain | **`codealong.neel.world` currently A → `206.189.129.31` (dead).** Point it back to Vercel: CNAME `codealong` → `cname.vercel-dns.com`. Until then use https://codealong-six.vercel.app . Domain is already attached on the Vercel project. |
+| Droplet | **Off.** Same IP as `status.neel.world`. Keep Docker/Caddy/Actions for later. When back: set Vercel env `CAPTURE_BACKEND_URL=https://status.neel.world/codealong-ocr` and run `deploy-droplet.yml` manually. |
 | SSH from campus | **Blocked** (port 22 timeout, 2222 timeout, 443 is Caddy). Same as AI-Manager: **do not SSH from campus**. Deploy via GitHub Actions. Hotspot if a shell is required: `ssh -i ~/.ssh/id_ed25519 neel@206.189.129.31` |
 
 **Human mistake this session:** ran droplet `apt-get` commands **on the Mac** inside `interactive-youtube`. Broke local `node_modules`; restored with `rm -rf node_modules && npm ci`. Deno got installed on the Mac (`~/.deno/bin/deno`) as a side effect. **Never run apt-get / `/opt/codealong` on the Mac.**
 
-**Remaining human step for any-video on the pretty URL:** GoDaddy DNS **A** record: name `codealong`, value `206.189.129.31`. **Do not CNAME to Vercel.** Today the CNAME/A is on Vercel, so Caddy never sees the host and live OCR cannot run in public.
+**Remaining human step for the pretty URL (droplet is off):** GoDaddy DNS **CNAME** `codealong` → `cname.vercel-dns.com`. Delete the A record to `206.189.129.31`. When a droplet exists again, you may switch that A record back.
 
 ---
 
@@ -264,7 +276,7 @@ OCR: crop the editor, never the white Chrome console (dark-left/bright-right win
 
 No XAI_API_KEY required. Never full-video vision, never dirty Tesseract as truth, never transparent IDE overlay.
 
-Deploy: Vercel project codealong is LIVE at https://codealong-six.vercel.app (seeds only; no ffmpeg). codealong.neel.world currently points at Vercel — wrong for live OCR. Droplet 206.189.129.31 user neel (same as status.neel.world). Actions deploy-droplet.yml already built docker on :3001, appended Caddy snippet, restarted caddy. Pretty URL needs GoDaddy A record codealong → 206.189.129.31 (NOT a Vercel CNAME). Campus Wi-Fi blocks SSH 22; never apt-get on the Mac; never ssh root@; deploy with git push. AI-Manager Caddyfile is ~/ai-manager/deploy/Caddyfile on the droplet.
+Deploy: Vercel project codealong is LIVE at https://codealong-six.vercel.app (seeds only; no ffmpeg). Droplet is OFF — do not proxy to status.neel.world. codealong.neel.world A record still points at 206.189.129.31 (dead); CNAME it back to cname.vercel-dns.com. Keep deploy-droplet.yml for later (workflow_dispatch only). Never apt-get on the Mac; never ssh root@; deploy with git push.
 
 Wait for my instruction. Do not deploy, do not SSH, do not edit, do not run the app unless I ask.
 ```
